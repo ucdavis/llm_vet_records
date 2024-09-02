@@ -1,0 +1,222 @@
+---
+title: "explore_errors"
+author: "Wulcan"
+date: "2024-08-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, directories and functions}
+library(tidyverse)
+library(readxl)
+library(ggalluvial)
+
+toBox <- "~/Library/CloudStorage/Box-Box/"
+inputDir <- paste0(toBox,"Projects/LLM/llm_vet_records/input/")
+outputDir <- paste0(toBox,"Projects/LLM/llm_vet_records/output/explore_errors/")
+```
+
+## Explore errors test GPT4o temp 0
+### Objective
+Summarize and explore types of errors made by GPT4o at temp 0
+### Input 
+- test_GPT4o_confusion_matrix (intermediates/clasification_performance)
+- categorize_errors.xlsx (manually classified errors at temp 0)
+### Output
+- summary_errors_GPT4o_temp0.csv (output/explore_errors)
+- summary_error_type_GPT4o_temp0.csv (output/explore_errors)
+- summary_disagreement_GPT4o_temp0.csv (output/explore_errors)
+- summary_human_agreement_GPT4o_temp0.csv (output/explore_errors)
+- summary_disagreement_type_GPT4o_temp0.csv (output/explore_errors)
+- summary_ambiguity_in_interpretation_disagreement_GPT4o_temp0.csv (output/explore_errors)
+- summary_ambiguity_in_citation_disagreement_GPT4o_temp0.csv (output/explore_errors)
+- summary_confusion_class_in_nonambiguos_citation_disagreement_GPT4o_temp0.csv (output/explore_errors)
+- F4b_alluvian_error_test_GPT4_t0.png (output/explore_errors)
+
+```{r}
+
+test_GPT4o_t0_confusion_matrix <- readRDS(paste0(toBox, "Projects/LLM/llm_vet_records/intermediates/classification_performance/test_GPT4o_confusion_matrix.rds")) %>%
+  filter(temperature == 0) %>%
+  mutate(error = ifelse(confusion_class == "FP" | confusion_class == "FN", TRUE, FALSE))
+
+summary_errors <- test_GPT4o_t0_confusion_matrix %>%
+  group_by(error) %>%
+  summarise(
+    count = n()
+  ) %>% 
+  mutate(questions = sum(count),
+         percentage_of_questions = count / questions  * 100) %>%
+  arrange(desc(count))
+
+print(summary_errors)
+write_csv(summary_errors, paste0(outputDir, "summary_errors_GPT4o_temp0.csv"))
+          
+categorized_errors <- read_xlsx(paste0(inputDir, "categorize_errors.xlsx")) %>%
+  mutate(disagreement = ifelse(agreement_human <1, TRUE, FALSE),
+         disagreement_type = recode(interpretation_or_citation,
+                                        "citation" = "Citation",
+                                             "interpretation" = "Interpretation"),
+    agreement_category = case_when(
+      agreement_human == 1.0 ~ "0",
+      agreement_human == 0.6 ~ "1",
+      agreement_human == 0.4 ~ "2",
+      TRUE ~ NA_character_
+    ),
+    ambiguity = case_when(
+      historic_resolved ~ "Temporal",
+      vague ~ "Vague",
+      historic_resolved == FALSE & vague == FALSE ~ "None"
+    )
+  )
+
+summary_error_type <- categorized_errors %>%
+  group_by(confusion_class) %>%
+  summarise(
+    count = n()
+  ) %>%
+  mutate(errors = sum(count),
+         questions = 1500,
+         percentage_of_errors = count / errors * 100,
+         percentage_of_questions = count / questions  * 100) %>%
+  arrange(desc(count))  
+
+print(summary_error_type)
+write_csv(summary_error_type, paste0(outputDir, "summary_error_type_GPT4o_temp0.csv"))
+
+summary_disagreement <- categorized_errors %>%
+  group_by(disagreement) %>%
+  summarise(
+    count = n()
+  ) %>%
+  mutate(errors = sum(count),
+         questions = 1500,
+         percentage_of_errors = count / errors * 100,
+         percentage_of_questions = count / questions  * 100) %>%
+  arrange(desc(count))
+
+print(summary_disagreement)
+write_csv(summary_disagreement, paste0(outputDir, "summary_disagreement_GPT4o_temp0.csv"))
+
+
+summary_human_agreement <- categorized_errors %>% 
+  group_by(agreement_human) %>%
+  summarise(
+    count = n()
+  ) %>%
+  mutate(errors = sum(count),
+         questions = 1500,
+         percentage_of_errors = count/errors,
+         percentage_of_questions = count / questions * 100) %>%
+  arrange(desc(count))
+
+print(summary_human_agreement)
+write_csv(summary_human_agreement, paste0(outputDir, "summary_human_agreement_GPT4o_temp0.csv"))
+
+summary_disagreement_type <- categorized_errors %>%
+  group_by(disagreement_type) %>%
+  summarise(
+    count = n()
+  ) %>%
+  mutate(errors = sum(count),
+         questions = 1500,
+         percentage_of_errors = count / errors * 100,
+         percentage_of_questions = count / questions * 100) %>%
+  arrange(desc(count))
+
+print(summary_disagreement_type)
+write_csv(summary_disagreement_type, paste0(outputDir, "summary_disagreement_type_GPT4o_temp0.csv"))
+
+summary_ambiguity_in_interpretation_disagreement <- 
+  categorized_errors %>%
+  filter(disagreement_type == "Interpretation") %>%
+  group_by(ambiguity) %>%
+  summarise(
+    count = n()
+  ) %>%
+  mutate(disagreement = sum(count),
+         errors = 43,
+         questions = 1500,
+         percentage_of_interpretation_disagreement = count/disagreement *100,
+         percentage_of_errors = count / errors * 100,
+         percentage_of_questions = count / questions * 100) %>%
+  arrange(desc(count))
+
+print(summary_ambiguity_in_interpretation_disagreement)
+write_csv(summary_ambiguity_in_interpretation_disagreement, paste0(outputDir, "summary_ambiguity_in_interpretation_disagreement_GPT4o_temp0.csv"))
+
+summary_ambiguity_in_citation_disagreement <- 
+  categorized_errors %>%
+  filter(disagreement_type == "Citation") %>%
+  group_by(ambiguity) %>%
+  summarise(
+    count = n()
+  ) %>%
+  mutate(disagreement = sum(count),
+         errors = 43,
+         questions = 1500,
+         percentage_of_citation_disagreement = count/disagreement *100,
+         percentage_of_errors = count / errors * 100,
+         percentage_of_questions = count / questions * 100) %>%
+  arrange(desc(count))
+
+print(summary_ambiguity_in_citation_disagreement)
+write_csv(summary_ambiguity_in_citation_disagreement, paste0(outputDir, "summary_ambiguity_in_citation_disagreement_GPT4o_temp0.csv"))
+
+summary_confusion_class_in_nonambiguos_citation_disagreement <- 
+  categorized_errors %>%
+  filter(disagreement_type == "Citation" & ambiguity == "None") %>%
+  group_by(confusion_class) %>%
+  summarise(
+    count = n()
+  ) %>%
+  mutate(nonambigous_citation_disagreement = sum(count),
+         errors = 43,
+         questions = 1500,
+         percentage_of_non_ambiguous_citation_disagreement = count/nonambigous_citation_disagreement *100,
+         percentage_of_errors = count / errors * 100,
+         percentage_of_questions = count / questions * 100) %>%
+  arrange(desc(count))
+
+print(summary_confusion_class_in_nonambiguos_citation_disagreement)
+write_csv(summary_confusion_class_in_nonambiguos_citation_disagreement, paste0(outputDir, "summary_confusion_class_in_nonambiguos_citation_disagreement_GPT4o_temp0.csv"))
+
+
+human_agreement_palette <- c("0" = "#9F3303",
+                             "1" = "#FA8533",
+                             "2" = "#FDBE85")
+
+# Create the alluvial plot
+alluvian_plot <- ggplot(categorized_errors,
+       aes(axis1 = agreement_category, axis2 = disagreement_type, axis3 = ambiguity)) +
+  geom_alluvium(aes(fill = agreement_category)) +
+  scale_fill_manual(
+      values = human_agreement_palette) +
+  geom_stratum() +
+  geom_text(stat = "stratum",aes(label = after_stat(stratum)), angle=c(0,0,0,45,45,45, 45, 0),size=3) +
+  scale_x_discrete(limits = c("Divergent human opinions (n)", "Type of discrepancy", "Type of ambiguity")) +
+  labs(y = "Count") +
+  theme_bw() +
+  theme(
+      legend.position = "none", 
+      text = element_text(family = "Arial", size = 8),
+      strip.text = element_text(family = "Arial", size = 8),
+      axis.text.x = element_text (family = "Arial", size = 8),
+      axis.text.y = element_text (family = "Arial", size = 8)
+    )
+
+print(alluvian_plot)
+
+# Titles for the plots in the desired order
+titles <- c("Decreased appetite?", "Vomiting?", "Weight loss?", "Diarrhea?", "Constipation?", "Polyphagia?")
+
+
+ggsave(filename = file.path(outputDir, "F4b_alluvian_error_test_GPT4_t0.png"), plot = alluvian_plot, width = 180, height = 60 , units = "mm", dpi = 300)
+
+```
+
+
+
+

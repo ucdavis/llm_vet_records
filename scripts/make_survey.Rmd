@@ -1,0 +1,178 @@
+---
+title: "make_survey"
+author: "Wulcan"
+date: "2024-08-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Objective
+Generate a qualtrics survey from a set of records
+```{r libraries, directories and functions}
+library(tidyverse)
+library(readxl)
+library(jsonlite)
+
+toBox <- "~/Library/CloudStorage/Box-Box/"
+#toBox <- "C:/Users/15303/Box/" #lenovo
+
+inputDir <- paste0(toBox,"Projects/LLM/llm_vet_records/input/")
+
+intermediatesDir <- paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/make_survey/")
+
+# Function to escape HTML tags (to keep <> visible)
+escape_html <- function(text) {
+  text <- gsub("<", "&lt;", text)
+  text <- gsub(">", "&gt;", text)
+  return(text)
+}
+
+generate_survey_text <- function(data) {
+  survey_text <- "[[AdvancedFormat]]\n\n"
+  
+  for (i in 1:nrow(data)) {
+    case_no <- data$case[i]
+    admission_date <- data$admission_date_visit[i]
+    presenting_complaint <- data$presentingComplaint_visit[i]
+    history <- data$pertinentHistory_visit[i]
+    
+     block_text <- paste0(
+      "[[Block: Case ", case_no, "]]\n\n",
+      
+      "[[Question: Timing]]\n",
+      "[[ID: case_", case_no, "_timing]]\n\n",
+      
+      "[[Question: DB]]\n",
+      "[[ID: case_", case_no, "_history]]\n",
+      "<b>Case number:</b>\n", case_no, "<br><br>",
+      
+      "<b>Admission date:</b>\n", admission_date, "<br><br>",
+      "<b>Presenting complaint:</b>\n", presenting_complaint, "<br><br>",
+      "<b>History:</b>\n", history,"\n\n",
+      
+      "[[Question: TE]]\n",
+      "[[ID: case_", case_no, "_appetite_reference]]\n",
+      "<b>Appetite:</b>\n<br><br>",
+      "Reference: \n\n",
+      
+      "[[Question: MC:SingleAnswer]]\n",
+      "[[ID: case_", case_no, "_decreased_appetite]]\n",
+      "Decreased appetite?\n",
+      "[[Choices]]\n",
+      "TRUE\n",
+      "FALSE\n\n",
+      
+      "[[Question: MC:SingleAnswer]]\n",
+      "[[ID: case_", case_no, "_polyphagia]]\n",
+      "Polyphagia?\n",
+      "[[Choices]]\n",
+      "TRUE\n",
+      "FALSE\n\n",
+      
+      "[[Question: TE]]\n",
+      "[[ID: case_", case_no, "_vomiting_reference]]\n",
+      "<b>Vomiting:</b>\n<br><br>",
+      "Reference: \n\n",
+      
+      "[[Question: MC:SingleAnswer]]\n",
+      "[[ID: case_", case_no, "_vomiting]]\n",
+      "Vomiting?\n",
+      "[[Choices]]\n",
+      "TRUE\n",
+      "FALSE\n\n",
+      
+      "[[Question: TE]]\n",
+      "[[ID: case_", case_no, "_defecation_reference]]\n",
+      "<b>Defecation:</b>\n<br><br>",
+      "Reference: \n\n",
+      
+      "[[Question: MC:SingleAnswer]]\n",
+      "[[ID: case_", case_no, "_diarrhea]]\n",
+      "Diarrhea?\n",
+      "[[Choices]]\n",
+      "TRUE\n",
+      "FALSE\n\n",
+      
+      "[[Question: MC:SingleAnswer]]\n",
+      "[[ID: case_", case_no, "_constipation]]\n",
+      "Constipation?\n",
+      "[[Choices]]\n",
+      "TRUE\n",
+      "FALSE\n\n",
+      
+      "[[Question: TE]]\n",
+      "[[ID: case_", case_no, "_weight_reference]]\n",
+      "<b>Weight:</b>\n<br><br>",
+      "Reference: \n\n",
+      
+      "[[Question: MC:SingleAnswer]]\n",
+      "[[ID: case_", case_no, "_weight_loss]]\n",
+      "Weight loss?\n",
+      "[[Choices]]\n",
+      "TRUE\n",
+      "FALSE\n\n"
+    )
+    survey_text <- paste0(survey_text, block_text)
+  }
+  
+  return(survey_text)
+}
+```
+
+## Make pilot survey
+### Input
+- pilot_hx_deidentified.xlsx (manually deidentified pilot hx set)
+### Output
+- qualtrics_survey_pilot_hx.txt (intermediates/make_survey)
+### Issues / Deviations
+Originally surveys were constructed and completeted in five batches a 20 records. Conglomerated here for simplicity (full script and files in LLM/vault)
+The field "presenting complaint" was not included in the pilot survey (commented out)
+```{r}
+pilot_hx_deidentified <- read_xlsx(paste0(inputDir, "pilot_hx_deidentified.xlsx"))
+
+survey_pilot_hx  <- generate_survey_text(pilot_hx_deidentified)
+
+#writeLines(survey_pilot_hx, paste0(intermediatesDir,"survey_pilot_hx.txt"))
+```
+
+## Make tuning survey
+### Input
+- tuning_deid (intermediates/parse_deid/)
+### Output
+- survey_tuning.txt (intermediates/make_survey)
+### Deviations/Issues
+The field "presenting complaint" was not included in the tuning survey (commented out)
+```{r make tuning survey}
+tuning_deid <- fromJSON(paste0(toBox, "Projects/LLM/llm_vet_records/intermediates/parse_deid/tuning_deid.json"))
+
+# Escape HTML tags (allows <> around redacted text to be visible in qualtrics survey)
+tuning_deid <- tuning_deid %>%
+  mutate(pertinentHistory_visit = sapply(pertinentHistory_visit, escape_html))
+
+survey_tuning <- generate_survey_text(tuning_deid)
+
+#writeLines(survey_tuning, paste0(intermediatesDir,"survey_tuning.txt"))
+```
+
+## Make test survey
+### Input
+- test_deid (intermediates/parse_deid/)
+### Output
+- survey_test.txt (intermediates/make_survey)
+```{r make test survey}
+# Escape html tags
+test_deid <- fromJSON(paste0(toBox, "Projects/LLM/llm_vet_records/intermediates/parse_deid/test_deid.json")) %>%
+  mutate(presentingComplaint_visit = sapply(presentingComplaint_visit, escape_html),
+         pertinentHistory_visit = sapply(pertinentHistory_visit, escape_html))
+
+survey_test <- generate_survey_text(test_deid)
+
+# Save the survey text to a file
+writeLines(survey_test, paste0(intermediatesDir,"survey_test.txt"))
+
+```
+
+

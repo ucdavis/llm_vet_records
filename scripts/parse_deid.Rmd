@@ -1,0 +1,43 @@
+---
+title: "parse_deid"
+author: "Wulcan"
+date: "2024-08-14"
+output: html_document
+---
+
+# Objective
+save xlsx file to json and rds
+
+```{r libraries and directories}
+library(readxl)
+library(jsonlite)
+library(writexl)
+
+inputDir <- paste0(toBox,"Projects/LLM/llm_vet_records/input/")
+intermediatesDir <- paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/parse_deid/")  
+```
+
+## Deidentified tuning set
+```{r tuning}
+
+tuning_deid <- read_xlsx(paste0(inputDir, "tuning_deid.xlsx"))
+
+saveRDS(tuning_deid, paste0(intermediatesDir, "tuning_deid.rds"))
+
+tuning_json <- toJSON(tuning_deid, pretty=TRUE)
+
+write(tuning_json, file = paste0(intermediatesDir, "tuning_deid.json")) 
+```
+
+## Deidentified test set
+```{r test}
+
+test_deid <- read_xlsx(paste0(inputDir, "test_deidentified.xlsx"))
+
+saveRDS(test_deid, paste0(intermediatesDir, "test_deid.rds"))
+
+test_json <- toJSON(test_deid, pretty=TRUE)
+
+write(test_json, file = paste0(intermediatesDir, "test_deid.json")) 
+
+```

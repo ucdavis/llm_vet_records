@@ -1,0 +1,179 @@
+---
+title: "explore_cost_and_time"
+author: "Wulcan"
+date: "2024-08-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, directories and functions}
+toBox <- "~/Library/CloudStorage/Box-Box/"
+#toBox <- "C:/Users/15303/Box/"
+
+outputDir <- paste0(toBox,"Projects/LLM/llm_vet_records/output/explore_cost_and_time/")
+
+explore_cost_and_time <- function(llm_response_parsed) {
+
+  # Plot cost by temperature
+  cost_by_temp <- ggplot(llm_response_parsed, aes(x = factor(temperature), y = cost_cents)) +
+    geom_boxplot(fill = "#3282Bd") +
+    labs(x = "Temperature",
+         y = "Cost (cents/record)") +
+    theme_bw() +
+    theme(
+      legend.position = "right", 
+      legend.box = "horizontal",
+      legend.direction = "vertical", 
+      legend.key.height = unit(0.1, "in"),  
+      legend.key.width = unit(0.1, "in"),  
+      legend.spacing.y = unit(0.05, "in"),  
+      axis.text = element_text(size = 9, family = "Arial"),
+      axis.title = element_text(size = 9, family = "Arial"),
+      strip.text = element_text(size = 9, family = "Arial"),
+      legend.title = element_text(size = 9, family = "Arial")
+    ) 
+  
+  
+  # Plot histograms for each temperature with adjusted x scale and custom facet labels
+  cost_histogram <- ggplot(llm_response_parsed, aes(x = cost_cents)) +
+    geom_histogram(binwidth = 0.1, fill = "#3282Bd", color = "black", alpha = 0.7) +
+    labs(title = "Cost per Record",
+         x = "Cost in Cents",
+         y = "Frequency") +
+    theme_bw() +
+    theme(
+      axis.text = element_text(size = 9, family = "Arial"),
+      axis.title = element_text(size = 9, family = "Arial"),  
+      legend.title = element_text(size = 9, family = "Arial")
+    )
+  
+  # Plot cost by temperature
+  time_by_temp <- ggplot(llm_response_parsed, aes(x = factor(temperature), y = elapsed_time)) +
+    geom_boxplot(fill = "#3282Bd") +
+    labs(x = "Temperature",
+         y = "Time (s/record)") +
+    theme_bw() +
+    theme(
+      legend.position = "right", 
+      legend.box = "horizontal",
+      legend.direction = "vertical", 
+      legend.key.height = unit(0.1, "in"),  
+      legend.key.width = unit(0.1, "in"),  
+      legend.spacing.y = unit(0.05, "in"),  
+      axis.text = element_text(size = 9, family = "Arial"),
+      axis.title = element_text(size = 9, family = "Arial"),
+      strip.text = element_text(size = 9, family = "Arial"),
+      legend.title = element_text(size = 9, family = "Arial")
+    ) 
+  
+  
+  # Plot histograms for each temperature with adjusted x scale and custom facet labels
+  time_histogram <- ggplot(llm_response_parsed, aes(x = elapsed_time)) +
+    geom_histogram(binwidth = 0.1, fill = "#3282Bd", color = "black", alpha = 0.7) +
+    labs(title = "Time per Record",
+         x = "Time in s",
+         y = "Frequency") +
+    theme_bw() +
+    theme(
+      axis.text = element_text(size = 9, family = "Arial"),
+      axis.title = element_text(size = 9, family = "Arial"),  
+      legend.title = element_text(size = 9, family = "Arial")
+    )
+  
+  # Calculate summary statistics for costs_per_Record
+  summary_by_temp <- llm_response_parsed %>%
+    group_by(temperature) %>%
+    summarise(
+      mean_cost_cents = if_else(n() > 0, mean(cost_cents, na.rm = TRUE), NA_real_),
+      median_cost_cents = if_else(n() > 0, median(cost_cents, na.rm = TRUE), NA_real_),
+      sd_cost_cents = if_else(n() > 0, sd(cost_cents, na.rm = TRUE), NA_real_),
+      min_cost_cents = if_else(n() > 0, min(cost_cents, na.rm = TRUE), NA_real_),
+      max_cost_cents = if_else(n() > 0, max(cost_cents, na.rm = TRUE), NA_real_),
+      quantile_25_cost_cents = if_else(n() > 0, quantile(cost_cents, 0.25, na.rm = TRUE), NA_real_),
+      quantile_75_cost_cents = if_else(n() > 0, quantile(cost_cents, 0.75, na.rm = TRUE), NA_real_),
+       mean_time_s = if_else(n() > 0, mean(elapsed_time, na.rm = TRUE), NA_real_),
+      median_time_s = if_else(n() > 0, median(elapsed_time, na.rm = TRUE), NA_real_),
+      sd_time_s = if_else(n() > 0, sd(elapsed_time, na.rm = TRUE), NA_real_),
+      min_time_s = if_else(n() > 0, min(elapsed_time, na.rm = TRUE), NA_real_),
+      max_time_s = if_else(n() > 0, max(elapsed_time, na.rm = TRUE), NA_real_),
+      quantile_25_time_s = if_else(n() > 0, quantile(elapsed_time, 0.25, na.rm = TRUE), NA_real_),
+      quantile_75_time_s = if_else(n() > 0, quantile(elapsed_time, 0.75, na.rm = TRUE), NA_real_),
+      .groups = "drop"
+    )
+  
+  # Calculate summary statistics for costs_per_Record
+  cost_time_summary <- llm_response_parsed %>%
+    summarise(
+      mean_cost_cents = if_else(n() > 0, mean(cost_cents, na.rm = TRUE), NA_real_),
+      median_cost_cents= if_else(n() > 0, median(cost_cents, na.rm = TRUE), NA_real_),
+      sd_cost_cents = if_else(n() > 0, sd(cost_cents, na.rm = TRUE), NA_real_),
+      min_cost_cents = if_else(n() > 0, min(cost_cents, na.rm = TRUE), NA_real_),
+      max_cost_cents = if_else(n() > 0, max(cost_cents, na.rm = TRUE), NA_real_),
+      quantile_25_cost_cents = if_else(n() > 0, quantile(cost_cents, 0.25, na.rm = TRUE), NA_real_),
+      quantile_75_cost_cents = if_else(n() > 0, quantile(cost_cents, 0.75, na.rm = TRUE), NA_real_),
+       mean_time_s = if_else(n() > 0, mean(elapsed_time, na.rm = TRUE), NA_real_),
+      median_time_s = if_else(n() > 0, median(elapsed_time, na.rm = TRUE), NA_real_),
+      sd_time_s = if_else(n() > 0, sd(elapsed_time, na.rm = TRUE), NA_real_),
+      min_time_s = if_else(n() > 0, min(elapsed_time, na.rm = TRUE), NA_real_),
+      max_time_s = if_else(n() > 0, max(elapsed_time, na.rm = TRUE), NA_real_),
+      quantile_25_time_s = if_else(n() > 0, quantile(elapsed_time, 0.25, na.rm = TRUE), NA_real_),
+      quantile_75_time_s = if_else(n() > 0, quantile(elapsed_time, 0.75, na.rm = TRUE), NA_real_),
+      .groups = "drop"
+    )
+  
+  # Return the generated summary and plots
+  return(list(cost_by_temp = cost_by_temp, cost_histogram = cost_histogram, time_by_temp = time_by_temp, time_histogram = time_histogram,  cost_time_by_temp_summary = summary_by_temp, cost_time_summary = cost_time_summary))
+}
+```
+
+
+## Explore cost and time GPT4o
+### Input
+- test_GPT4o_corrected_parsed (intermediates/parse_llm_output)
+### Output
+- test_GPT4o_cost_and_time.csv (output/explore_cost_and_time)
+```{r cost test GPT4o}
+test_GPT4o_corrected_parsed <- readRDS(paste0(toBox, "Projects/LLM/llm_vet_records/intermediates/parse_llm_output/test_GPT4o_corrected_parsed.rds"))
+
+results <- explore_cost_and_time(test_GPT4o_corrected_parsed)
+
+print(results$cost_by_temp)
+print(results$cost_histogram)
+print(results$time_by_temp)
+print(results$time_histogram)
+print(results$cost_time_by_temp_summary)
+print(results$cost_time_summary)
+
+time_cost_test_GPT4o <- results$cost_time_summary %>% 
+  select(median_cost_cents, quantile_25_cost_cents, quantile_75_cost_cents, median_time_s, quantile_25_time_s, quantile_75_time_s) 
+  
+write_csv(time_cost_test_GPT4o, paste0(outputDir, "time_cost_test_GPT4o.csv"))
+```
+
+## Explore cost and time GPT35
+### Input
+- test_GPT35_parsed (intermediates/parse_llm_output)
+### Output
+- test_GPT35_cost_and_time.csv (output/explore_cost_and_time)
+```{r cost test GPT4o}
+test_GPT35_parsed <- readRDS(paste0(toBox, "Projects/LLM/llm_vet_records/intermediates/parse_llm_output/test_GPT35_parsed.rds"))
+
+results <- explore_cost_and_time(test_GPT35_parsed)
+
+print(results$cost_by_temp)
+print(results$cost_histogram)
+print(results$time_by_temp)
+print(results$time_histogram)
+print(results$cost_time_by_temp_summary)
+print(results$cost_time_summary)
+
+time_cost_test_GPT35 <- results$cost_time_summary %>% 
+  select(median_cost_cents, quantile_25_cost_cents, quantile_75_cost_cents, median_time_s, quantile_25_time_s, quantile_75_time_s)
+  
+write_csv(time_cost_test_GPT35, paste0(outputDir, "time_cost_test_GPT35.csv"))
+```
+
+

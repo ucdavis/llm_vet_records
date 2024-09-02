@@ -1,0 +1,355 @@
+---
+title: "sample_records"
+author: "Wulcan"
+date: "2024-08-14"
+output: html_document
+---
+
+# Objective
+A script to sample a set of records and provide some exploratory summary stats and exploration
+
+# Issues and deviations
+The current function does not automatically resample for duplicated (patientNo) but reports it. Will be adjusted in future projects but kept as is for reproducibility.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, directories and functions}
+library(tidyverse)
+library(writexl)
+
+toBox <- "~/Library/CloudStorage/Box-Box/"
+#toBox <- "C:/Users/15303/Box/" #lenovo
+
+inputDir <- paste0(toBox,"Projects/LLM/llm_vet_records/input/")
+
+intermediatesDir <- paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/sample_records/")
+
+outputDir <- paste0(toBox, "Projects/LLM/llm_vet_records/output/sample_records/")
+
+# Function for pulling random sample (allowing exclusion of previously used)
+  sample_records <- function(df_pool, used_dfs, n, seed) {
+    
+     # Check if used_dfs is empty
+  if (length(used_dfs) == 0) {
+    exclude <- character(0)  # Empty vector, meaning no exclusions
+  } else {
+    # Combine visitNos from all used_dfs
+    exclude <- do.call(union, lapply(used_dfs, function(df) df$visitNo))
+  }
+  
+  # Filter out the records that have already been used
+  sampling_pool <- df_pool %>% filter(!visitNo %in% exclude)
+  
+  # Set the seed for reproducibility
+  set.seed(seed)
+  
+  # Pull n random cases from the sampling pool
+  sampled_records <- sampling_pool %>% sample_n(n)
+  
+  # Check for duplicate patientNos
+  any_duplicates <- duplicated(sampled_records$patientNo) | duplicated(sampled_records$patientNo, fromLast = TRUE)
+  
+  # Print the result of the duplicate check
+  if (any(any_duplicates)) {
+    print("There are duplicates in the patientNo variable.")
+  } else {
+    print("There are no duplicates in the patientNo variable.")
+  }
+  
+  # Get the duplicate values in patientNo
+  duplicate_values <- unique(sampled_records$patientNo[duplicated(sampled_records$patientNo) | duplicated(sampled_records$patientNo, fromLast = TRUE)])
+  
+  # Remove duplicates
+  removed_rows <- c()
+  for (dup_value in duplicate_values) {
+    dup_rows <- which(sampled_records$patientNo == dup_value)
+    removed_row <- sample(dup_rows, 1)
+    removed_rows <- c(removed_rows, removed_row)
+    sampled_records <- sampled_records[-removed_row, ]
+  }
+  
+  # Get remaining patientNos from the sampling pool
+  remaining_patientNo <- setdiff(sampling_pool$patientNo, sampled_records$patientNo)
+  
+  # Add new records to replace removed duplicates
+  for (i in seq_along(removed_rows)) {
+    new_record <- sampling_pool %>%
+      filter(patientNo %in% remaining_patientNo) %>%
+      sample_n(1)
+    
+    sampled_records <- rbind(sampled_records, new_record)
+    remaining_patientNo <- setdiff(remaining_patientNo, new_record$patientNo)
+  }
+  
+  # Check again for duplicates
+  any_duplicates <- duplicated(sampled_records$patientNo) | duplicated(sampled_records$patientNo, fromLast = TRUE)
+  
+  if (any(any_duplicates)) {
+    print("There are duplicates in the patientNo variable.")
+  } else {
+    print("There are no duplicates in the patientNo variable.")
+  }
+  
+  # Add a case number
+  sampled_records <- sampled_records %>% mutate(case = row_number())
+  
+  # Generate the summary table
+  summary_table <- sampled_records %>%
+    summarise(
+      year_min = min(year, na.rm = TRUE),
+      year_max = max(year, na.rm = TRUE),
+      year_mean = mean(year, na.rm = TRUE),
+      year_median = median(year, na.rm = TRUE),
+      year_sd = sd(year, na.rm = TRUE),
+      year_25th = quantile(year, 0.25, na.rm = TRUE),
+      year_75th = quantile(year, 0.75, na.rm = TRUE),
+      wordCount_min = min(pertinentHistory_wordCount, na.rm = TRUE),
+      wordCount_max = max(pertinentHistory_wordCount, na.rm = TRUE),
+      wordCount_mean = mean(pertinentHistory_wordCount, na.rm = TRUE),
+      wordCount_median = median(pertinentHistory_wordCount, na.rm = TRUE),
+      wordCount_sd = sd(pertinentHistory_wordCount, na.rm = TRUE),
+      wordCount_25th = quantile(pertinentHistory_wordCount, 0.25, na.rm = TRUE),
+      wordCount_75th = quantile(pertinentHistory_wordCount, 0.75, na.rm = TRUE)
+    )
+  
+  # Create histogram for 'year'
+  histogram_year <- ggplot(sampled_records, aes(x = year)) +
+    geom_histogram(binwidth = 1, fill = "#3282Bd", color = "black") +
+    labs(x = "Year", y = "Frequency") +
+    scale_x_continuous(limits = c(1991, 2023), breaks = seq(1991, 2023, by = 4)) +
+    theme_bw() +
+    theme(
+      axis.text = element_text(size = 9, family = "Arial"),
+      axis.title = element_text(size = 9, family = "Arial"),  
+      legend.title = element_text(size = 9, family = "Arial")
+    )
+  
+  # Create histogram for 'pertinentHistory_wordCount'
+  histogram_words <- ggplot(sampled_records, aes(x = pertinentHistory_wordCount)) +
+    geom_histogram(binwidth = 25, fill = "#3282Bd", color = "black") +
+    labs(x = "Word Count", y = "Frequency") +
+    theme_bw() +
+    scale_x_continuous(limits = c(0, 1400), breaks = seq(0, 1400, by = 200)) + 
+    theme(
+      axis.text = element_text(size = 9, family = "Arial"),
+      axis.title = element_text(size = 9, family = "Arial"),  
+      legend.title = element_text(size = 9, family = "Arial")
+    )
+  
+  # Return the sampled records, summary table, and plots
+  list(
+    sampled_records = sampled_records,
+    summary_table = summary_table,
+    histogram_year = histogram_year,
+    histogram_words = histogram_words
+  )
+  }
+  
+
+#Function for selecting specific cases
+select_cases <- function(cases, df) {
+  # Filter the data to include only the selected cases
+  selected_cases <- df %>%
+    filter(case %in% cases)
+  
+  return(selected_cases)
+}
+
+```
+
+
+## Sample pilot free text
+### Objective
+Generate a pilot set from EHRs (all free text fields)
+### Input
+- contains_free_text.rds <VMACS/all_cats_ever/output/contains_free_text>
+### Output
+- pilot_free_text.rds (also saved in vault for reproducibility)
+- pilot_free_text_for_grading.xlsx (used for manual evaluations first pilot set)
+
+```{r sample pilot free text}
+
+#Read in all records with non-empty free text fields
+contains_free_text <- readRDS(paste0(inputDir, "contains_free_text.rds"))
+
+# Combine the used data frames in a list
+used_dfs <- list()
+
+# Call the function to get 270 new records
+results <- sample_records(contains_free_text, used_dfs, n = 270, seed = 123)
+pilot_free_text <- results$sampled_records
+
+print(results$summary_table)
+print(results$histogram_year)
+print(results$histogram_words)
+
+pilot_free_text <- results$sampled_records %>% 
+  select(patientNo, visitNo, admission_date_visit, discharge_date_visit, age_visit, weight_visit, bcs_visit, presentingComplaint_visit, pertinentHistory_visit, physicalExamination_visit, problems_visit, procedures_visit, plans_and_progress_notes_visit, clinicalDx_visit, comments_visit, dischargeSummary_visit, dischargeInstructions_visit)
+
+#saveRDS(pilot_free_text, paste0(intermediatesDir, "pilot_free_text.rds"))
+
+#Create grading sheet with variables of interest
+#discard everything expept visitNo
+pilot_free_text_id <- pilot_free_text %>% select(visitNo)
+
+#For each of the clinical signs, generate variables
+clinical_signs <- c("lethargy", "decreased_appetite", "polyphagia", "vomiting", "diarrhea", "constipation", "weight_loss")
+
+suffix_1 <- c("_presence", "_frequency_times_per_week", "_grade", "_acute_vs_chronic", "_duration_days")
+
+suffix_2 <- "_citation"
+
+# Loop through each clinical sign and each suffix to create new columns
+for (sign in clinical_signs) {
+  for (suf in suffix_1) {
+    new_var <- paste0(sign, suf)
+    pilot_free_text_id[[new_var]] <- "" # Initialize with empty string
+    citation_var <- paste0(new_var, suffix_2)
+    pilot_free_text_id[[citation_var]] <- "" # Initialize citation variable with empty string
+  }
+}
+
+#remove variables that doesn;t make sense
+pilot_free_text_id <- pilot_free_text_id %>% select(-lethargy_frequency_times_per_week,
+                                  -lethargy_frequency_times_per_week_citation,
+                                  -decreased_appetite_frequency_times_per_week, 
+                                  -decreased_appetite_frequency_times_per_week_citation, - polyphagia_frequency_times_per_week, - polyphagia_frequency_times_per_week_citation, -polyphagia_grade, -polyphagia_grade_citation, -constipation_frequency_times_per_week, -constipation_frequency_times_per_week_citation, -weight_loss_frequency_times_per_week, -weight_loss_frequency_times_per_week_citation)
+
+#save as excel
+#write_xlsx(pilot_free_text_id, paste0(intermediatesDir,"pilot_free_text_for_grading.xlsx"))
+
+```
+
+## Sample pilot hx
+### Objective
+Generate a pilot set from EHRs (history fields only)
+### Input
+- contains_hx.rds (VMACS/all_cats_ever/output/contains_free_text/)
+### Output
+- pilot_hx.rds (also saved in vault for reproducibility)
+- pilot_hx_for_deid.xlsx (template for manual deidentification)
+### Issues / Deviations
+Cases in pilot_free_text not excluded
+```{r sample pilot hx}
+
+#Read in all records with non-empty histories
+#contains_hx <- readRDS(paste0(inputDir, "contains_hx.rds"))
+
+# Combine the used data frames in a list
+used_dfs <- list()
+
+# Call the function to get 270 new records
+results <- sample_records(contains_free_text, used_dfs, n = 100, seed = 234)
+pilot_free_text <- results$sampled_records
+
+print(results$summary_table)
+print(results$histogram_year)
+print(results$histogram_words)
+
+
+#select_variables
+pilot_hx_for_export <- pilot_hx %>% select(case, admission_date_visit, presentingComplaint_visit, pertinentHistory_visit) 
+
+#Save rds
+#saveRDS(pilot_hx, paste0(intermediates, "pilot_hx.rds"))
+#write_xlsx(pilot_hx_for_export, paste0(intermediatesDir, "pilot_hx_for_deid.xlsx"))
+```
+
+## Select tuning set
+### Objective
+Generate a tuning set of handpicked EHRs from pilot_hx
+
+### Input
+- pilot_hx (intemediates/sample_records)
+
+### Output
+- tuning_for_deid (intermediates/sample_records)
+
+```{r select tuning}
+
+
+pilot_hx <- readRDS(paste0(intermediatesDir, "pilot_hx.rds")) %>% 
+  select(case, admission_date_visit, presentingComplaint_visit, pertinentHistory_visit)
+
+# Selected cases identified from pilot_hx as good tuning cases
+selected_tuning <- c(30, 17, 10, 45, 49, 50, 51, 57, 78, 79)
+
+tuning_cases <- select_cases(selected_tuning, pilot_hx)
+
+#save as excel for manual removal of info
+write_xlsx(tuning_cases, paste0(intermediatesDir, "tuning_for_deid.xlsx"))
+```
+
+## Select example
+### Objective
+Select a handpicked EHRs from pilot_hx for prompt example
+
+### Input
+- pilot_hx (intermediates/sample_records)
+
+### Output
+- example_for_deid (intermediates/sample_records)
+```{r select example}
+intermediatesDir <- paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/sample_records/")
+
+pilot_hx <- readRDS(paste0(intermediatesDir, "pilot_hx.rds")) %>% 
+  select(case, admission_date_visit, presentingComplaint_visit, pertinentHistory_visit)
+
+# Selected cases identified from pilot_hx as good tuning cases
+selected_tuning <- 91
+
+example_case  <- select_cases(selected_tuning, pilot_hx)
+
+#save as excel for manual removal of info
+write_xlsx(example_case, paste0(intermediatesDir, "example_for_deid.xlsx"))
+
+```
+
+
+## Sample test set
+### Objective
+Generate a test set from EHRs (history and presenting complaint fields)
+### Input
+- contains_hx.rds (VMACS/all_cats_ever/output/contains_free_text/)
+- pilot_free_text.rds (intermediates/pilot)
+- pilot_hx.rds (intermediates/pilot)
+- pilot_hx_for_deid.xlsx (intermediates/pilot)
+
+### Output
+- test_250 (intermediates/test)
+- test_250_for_deid (intermediates/test)
+- year_words_test_set.csv (output/test)
+```{r sample test}
+#Read in all records with non-empty histories
+contains_hx <- readRDS(paste0(inputDir, "contains_hx.rds"))
+
+# Generate vector of visitNos to exclude (used in pilot sets)
+pilot_free_text <- readRDS(paste0(intermediatesDir, "pilot_free_text.rds"))
+pilot_hx <- readRDS(paste0(intermediatesDir, "pilot_hx.rds"))
+
+# Combine the used data frames in a list
+used_dfs <- list(pilot_free_text, pilot_hx)
+
+# Call the function to get 250 new records
+results <- sample_records(contains_hx, used_dfs, n = 250, seed = 345)
+test_250 <- results$sampled_records
+
+print(results$summary_table)
+print(results$histogram_year)
+print(results$histogram_words)
+
+#saveRDS(test_250, paste0(intermediatesDir, "test_set.rds")) #hold on to for reproducibility
+
+#select_variables for identification set
+#test_250_for_deid <- test_250 %>% select(case, admission_date_visit, presentingComplaint_visit, pertinentHistory_visit)
+
+#save as excel for manual removal of info
+#write_xlsx(test_250_for_deid, paste0(intermediatesDir, "test_for_deid.xlsx"))
+
+write_csv(results$summary_table, paste0(outputDir, "year_words_test_set.csv"))
+```
+
+
+

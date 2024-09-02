@@ -1,0 +1,378 @@
+---
+title: "classificiation_performance"
+author: "Wulcan"
+date: "2024-08-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, directories and functions}
+library(tidyverse)
+library(binom)
+
+toBox <- "~/Library/CloudStorage/Box-Box/"
+#toBox <- "C:/Users/15303/Box/"
+
+intermediatesDir <- paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/classification_performance/")
+
+outputDir <- paste0(toBox,"Projects/LLM/llm_vet_records/output/classification_performance/")
+
+analyze_classification_performance <- function(df_mode) {
+  
+  # Function to count confusion matrix elements
+  count_confusion_matrix <- function(df) {
+    TP <- sum(df$confusion_class == "TP")
+    FP <- sum(df$confusion_class == "FP")
+    FN <- sum(df$confusion_class == "FN")
+    TN <- sum(df$confusion_class == "TN")
+    list(TP = TP, FP = FP, FN = FN, TN = TN)
+  }
+  
+  # Function to calculate metrics
+  calculate_metrics <- function(TP, FP, FN, TN) {
+    sensitivity <- TP / (TP + FN) * 100
+    specificity <- TN / (TN + FP) * 100
+    ppv <- TP / (TP + FP) * 100
+    npv <- TN / (TN + FN) * 100
+    f1_score <- 2 * TP / (2 * TP + FP + FN) * 100
+    balanced_accuracy <- (sensitivity + specificity) / 2
+
+    # Calculate Wilson Confidence Intervals
+    sensitivity_ci <- binom.confint(TP, TP + FN, conf.level = 0.95, methods = "wilson")
+    specificity_ci <- binom.confint(TN, TN + FP, conf.level = 0.95, methods = "wilson")
+    ppv_ci <- binom.confint(TP, TP + FP, conf.level = 0.95, methods = "wilson")
+    npv_ci <- binom.confint(TN, TN + FN, conf.level = 0.95, methods = "wilson")
+
+    # Compile results
+    results <- tibble(
+      tp = TP,
+      fp = FP,
+      fn = FN,
+      tn = TN,
+      se = sensitivity,
+      se_lower = sensitivity_ci$lower * 100,
+      se_upper = sensitivity_ci$upper * 100,
+      sp = specificity,
+      sp_lower = specificity_ci$lower * 100,
+      sp_upper = specificity_ci$upper * 100,
+      ppv = ppv,
+      ppv_lower = ppv_ci$lower * 100,
+      ppv_upper = ppv_ci$upper * 100,
+      npv = npv,
+      npv_lower = npv_ci$lower * 100,
+      npv_upper = npv_ci$upper * 100,
+      f1_score = f1_score,
+      balanced_accuracy = balanced_accuracy
+    )
+
+    return(results)
+  }
+
+  # Generate confusion matrix classifications
+  df_confusion <- df_mode %>%
+    group_by(case, question) %>%
+    mutate(
+      human_mode = first(mode[respondent_type == "Humans"]), 
+      confusion_class = case_when(
+        respondent_type == "Humans" ~ "ground truth",
+        respondent_type != "Humans" & mode == TRUE & human_mode == TRUE ~ "TP",
+        respondent_type != "Humans" & mode == TRUE & human_mode == FALSE ~ "FP",
+        respondent_type != "Humans" & mode == FALSE & human_mode == TRUE ~ "FN",
+        respondent_type != "Humans" & mode == FALSE & human_mode == FALSE ~ "TN",
+        TRUE ~ NA_character_
+      )
+    ) %>%
+    ungroup() %>%
+    select(-human_mode)
+
+  # Calculate classification metrics by temperature and question
+  classification_metrics <- df_confusion %>%
+  group_by(temperature, question) %>%
+  do({
+    counts <- count_confusion_matrix(.)
+    metrics <- calculate_metrics(counts$TP, counts$FP, counts$FN, counts$TN)
+    metrics
+  }) %>%
+  ungroup() %>%
+  mutate(temperature = temperature) %>%  # Assign the temperature column directly
+  select(temperature, question, tp, tn, fp, fn, se, se_lower, se_upper, sp, sp_lower, sp_upper, ppv, ppv_lower, ppv_upper, npv, npv_lower, npv_upper, f1_score, balanced_accuracy) %>%
+  filter(temperature != "Humans")
+
+  # Calculate summary metrics grouped by temperature
+  classification_summary <- classification_metrics %>%
+    group_by(temperature) %>%
+    summarize(
+      se_median = median(se, na.rm = TRUE),
+      se_min = min(se, na.rm = TRUE),
+      se_max = max(se, na.rm = TRUE),
+      se_lower_quartile = quantile(se, 0.25, na.rm = TRUE),
+      se_upper_quartile = quantile(se, 0.75, na.rm = TRUE),
+      
+      sp_median = median(sp, na.rm = TRUE),
+      sp_min = min(sp, na.rm = TRUE),
+      sp_max = max(sp, na.rm = TRUE),
+      sp_lower_quartile = quantile(sp, 0.25, na.rm = TRUE),
+      sp_upper_quartile = quantile(sp, 0.75, na.rm = TRUE),
+      
+      ppv_median = median(ppv, na.rm = TRUE),
+      ppv_min = min(ppv, na.rm = TRUE),
+      ppv_max = max(ppv, na.rm = TRUE),
+      ppv_lower_quartile = quantile(ppv, 0.25, na.rm = TRUE),
+      ppv_upper_quartile = quantile(ppv, 0.75, na.rm = TRUE),
+      
+      npv_median = median(npv, na.rm = TRUE),
+      npv_min = min(npv, na.rm = TRUE),
+      npv_max = max(npv, na.rm = TRUE),
+      npv_lower_quartile = quantile(npv, 0.25, na.rm = TRUE),
+      npv_upper_quartile = quantile(npv, 0.75, na.rm = TRUE),
+      
+      f1_score_median = median(f1_score, na.rm = TRUE),
+      f1_score_min = min(f1_score, na.rm = TRUE),
+      f1_score_max = max(f1_score, na.rm = TRUE),
+      f1_score_lower_quartile = quantile(f1_score, 0.25, na.rm = TRUE),
+      f1_score_upper_quartile = quantile(f1_score, 0.75, na.rm = TRUE),
+    
+      balanced_accuracy_median = median(balanced_accuracy, na.rm = TRUE),
+      balanced_accuracy_min = min(balanced_accuracy, na.rm = TRUE),
+      balanced_accuracy_max = max(balanced_accuracy, na.rm = TRUE),
+      balanced_accuracy_lower_quartile = quantile(balanced_accuracy, 0.25, na.rm = TRUE),
+      balanced_accuracy_upper_quartile = quantile(balanced_accuracy, 0.75, na.rm = TRUE)
+    ) 
+
+  # Reshape the dataframe for plotting
+  metrics_long <- classification_metrics %>%
+    pivot_longer(cols = c(se, sp, ppv, npv, f1_score, balanced_accuracy),
+                 names_to = "metric",
+                 values_to = "value") %>%
+    pivot_longer(cols = c(se_lower, sp_lower, ppv_lower, npv_lower),
+                 names_to = "metric_lower",
+                 values_to = "lower",
+                 names_pattern = "(.*)_lower") %>%
+    pivot_longer(cols = c(se_upper, sp_upper, ppv_upper, npv_upper),
+                 names_to = "metric_upper",
+                 values_to = "upper",
+                 names_pattern = "(.*)_upper") %>%
+    filter((metric == metric_lower & metric == metric_upper) | metric %in% c("f1_score", "balanced_accuracy")) %>%
+    select(-metric_lower, -metric_upper)
+
+  # Define the order of the metrics
+  metrics_long$metric <- factor(metrics_long$metric, levels = c("se", "sp", "ppv", "npv", "f1_score", "balanced_accuracy"))
+
+  # Define the order of the questions
+  metrics_long$question <- factor(metrics_long$question, levels = c("decreased_appetite", "vomiting", "weight_loss", "diarrhea", "constipation", "polyphagia"))
+
+  # Define the labels for metrics
+  metrics_labels <- c(
+    se = "Sensitivity",
+    sp = "Specificity",
+    ppv = "PPV",
+    npv = "NPV",
+    f1_score = "F1 Score",
+    balanced_accuracy = "Balanced\naccuracy"
+  )
+
+  # Define the labels for questions
+  question_labels <- c(
+    decreased_appetite = "Decreased\nappetite",
+    vomiting = "Vomiting",
+    weight_loss = "Weight loss",
+    diarrhea = "Diarrhea",
+    constipation = "Constipation",
+    polyphagia = "Polyphagia"
+  )
+
+  # Create the faceted plot
+  classification_performance <- ggplot(metrics_long, aes(x = factor(temperature), y = value)) +
+    geom_point(color = "black") +
+    geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.1, data = subset(metrics_long, metric %in% c("se", "sp", "ppv", "npv"))) +
+    facet_grid(question ~ metric, labeller = labeller(metric = metrics_labels, question = question_labels)) +
+    scale_y_continuous(limits = c(0, 100)) +
+    labs(
+      x = "Temperature",
+      y = "Metric Value"
+    ) +
+    theme_bw() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "none",
+      strip.text = element_text(size = 8, family = "Arial"),
+      axis.text = element_text(size = 8, family = "Arial"),
+      axis.title = element_text(size = 10, family = "Arial")
+    )
+
+  # Return the results as a list
+  return(list(
+    confusion_matrix = df_confusion,
+    classification_metrics = classification_metrics,
+    classification_summary = classification_summary,
+    classification_plot = classification_performance
+  ))
+}
+
+perform_mcnemar_test_between_temperatures <- function(response_mode) {
+  response_mode_filtered <- response_mode %>%
+    filter(respondent_type != "Humans") %>%
+    select(case, question, temperature, mode)
+  
+  unique_temps <- unique(response_mode_filtered$temperature)
+  
+  response_mode_wide <- response_mode_filtered %>%
+    pivot_wider(names_from = temperature, values_from = mode, names_prefix = "temp_")
+  
+  McNemar_results_temp <- data.frame(
+    Comparison = character(),
+    Statistic = numeric(),
+    P_Value = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  temp_combinations <- combn(unique_temps, 2, simplify = FALSE)
+  
+  for (temp_pair in temp_combinations) {
+    temp1 <- paste0("temp_", temp_pair[1])
+    temp2 <- paste0("temp_", temp_pair[2])
+    
+    if (temp1 %in% names(response_mode_wide) && temp2 %in% names(response_mode_wide)) {
+      contingency_table <- table(response_mode_wide[[temp1]], response_mode_wide[[temp2]])
+      mcnemar_test <- mcnemar.test(contingency_table)
+      
+      McNemar_results_temp <- rbind(
+        McNemar_results_temp,
+        data.frame(
+          Comparison = paste(temp_pair[1], "vs", temp_pair[2]),
+          Statistic = mcnemar_test$statistic,
+          P_Value = mcnemar_test$p.value
+        )
+      )
+    }
+  }
+  
+  return(McNemar_results_temp)
+}
+
+
+
+# Define the function
+compare_models <- function(response_mode_1, response_mode_2, model_1, model_2) {
+  
+  # Read the first response dataframe and preprocess
+  response_1 <- response_mode_1 %>%
+    filter(respondent_type != "Humans") %>%
+    filter(temperature == 0) %>%
+    select(case, question, mode) %>%
+    setNames(c("case", "question", paste0("mode_", model_1)))
+  
+  # Read the second response dataframe and preprocess
+  response_2 <- response_mode_2 %>%
+    filter(respondent_type != "Humans") %>%
+    filter(temperature == 0) %>%
+    select(case, question, mode) %>%
+    setNames(c("case", "question", paste0("mode_", model_2)))
+  
+  # Merge the dataframes
+  merged_data <- merge(response_1, response_2, by = c("case", "question"))
+  
+  # Create a contingency table
+  contingency_table <- table(merged_data[[paste0("mode_", model_1)]], merged_data[[paste0("mode_", model_2)]])
+  
+  # Perform McNemar's test
+  mcnemar_result <- mcnemar.test(contingency_table)
+  
+  mcnemar_result_model <- data.frame(
+    Comparison = paste(model_1, "vs", model_2),
+    Statistic = mcnemar_result$statistic,
+    P_Value = mcnemar_result$p.value,
+    stringsAsFactors = FALSE
+  )
+  
+
+  
+ return(mcnemar_result_model)
+}
+
+
+```
+## Classification performance test GPT4o
+### Input
+- mode_test_GPT4o (intermediates/add_mode)
+### Output
+- test_GPT4o_confusion_matrix (intermediates/classification_performance)
+- test_GPT4o_classification_metrics.csv (output/classification_performance) (per clinical sign)
+- test_GPT4o_classification_summary.csv (output/classification_performance) (averaged across clinical signs
+- F1_test_GPT4o_classification_performance.png (output/classification_performance)
+- mcNemar_temp_test_GPT4o.csv (output/classification_performance)
+```{r classification performance test GPT4o}
+response_mode_test_GPT4o <- readRDS(paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/add_mode/mode_test_GPT4o.rds"))
+
+
+results <- analyze_classification_performance(response_mode_test_GPT4o)
+
+# Access the individual components
+confusion_matrix <- results$confusion_matrix
+classification_metrics <- results$classification_metrics
+classification_summary <- results$classification_summary
+classification_plot <- results$classification_plot
+
+print(classification_plot)
+
+saveRDS(confusion_matrix, paste0(intermediatesDir, "test_GPT4o_confusion_matrix.rds"))
+
+write_csv(classification_metrics, paste0(outputDir, "test_GPT4o_classification_metrics.csv"))
+
+write_csv(classification_summary, paste0(outputDir, "test_GPT4o_classification_summary.csv"))
+
+ggsave(filename = paste0(outputDir, "F1_test_GPT4o_classification_performance.png"), plot = classification_plot, width = 180, height = 180, units = "mm", dpi = 300)
+
+Mc_nemar_results_temp_test_GPT4o <- perform_mcnemar_test_between_temperatures(response_mode_test_GPT4o)
+print(Mc_nemar_results_temp_test_GPT4o)
+
+write_csv(Mc_nemar_results_temp_test_GPT4o, paste0(outputDir, "mcNemar_temp_test_GPT4o.csv"))
+```
+
+## Classification performance test GPT35
+### Input
+- mode_test_GPT35 (intermediates/add_mode)
+### Output
+- test_GPT35_classification_metrics.csv (output/classification_performance) (per clinical sign)
+- test_GPT35_classification_summary.csv (output/classification_performance) (averaged across clinical signs)
+```{r classification performance test GPT4o}
+response_mode_test_GPT35 <- readRDS(paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/add_mode/mode_test_GPT35.rds"))
+
+
+results <- analyze_classification_performance(response_mode_test_GPT35)
+
+# Access the individual components
+confusion_matrix <- results$confusion_matrix
+classification_metrics <- results$classification_metrics
+classification_summary <- results$classification_summary
+classification_plot <- results$classification_plot
+
+print(classification_plot)
+
+saveRDS(confusion_matrix, paste0(intermediatesDir, "test_GPT35_confusion_matrix.rds"))
+
+write_csv(classification_metrics, paste0(outputDir, "test_GPT35_classification_metrics.csv"))
+
+write_csv(classification_summary, paste0(outputDir, "test_GPT35_classification_summary.csv"))
+
+
+```
+
+
+```{r compare classification between models}
+
+response_mode_test_GPT35 <- readRDS(paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/add_mode/mode_test_GPT35.rds"))
+
+response_mode_test_GPT4o <- readRDS(paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/add_mode/mode_test_GPT4o.rds"))
+
+mcnemar_model_test_GPT35_vs_GPT4o <- compare_models(response_mode_test_GPT35, response_mode_test_GPT4o, "GPT-3.5", "GPT-4o")
+
+print(mcnemar_model_test_GPT35_vs_GPT4o)
+
+
+write_csv(mcnemar_model_test_GPT35_vs_GPT4o, paste0(outputDir, "mcNemar_model_test.csv"))
+```
+

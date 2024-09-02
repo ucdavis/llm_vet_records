@@ -1,0 +1,157 @@
+---
+title: "explore_output_format"
+author: "Wulcan"
+date: "2024-08-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Objective
+Explore llm output format for invalid outputs
+
+### Comments deviations and issues
+The python script used for making llm calls has built in functions for checking and documenting invalid output in the field "status". When the output doesn't matcth the specified criteria the output is saved to the field "response". In cases of failed completions, the error message from the API is saved to the field "response". 
+- "couldn't parse json": This is triggered if the output is not in a correct json format
+- "output not in unicode": This was supposed to be triggered if the output was not in correct unicode. I suspect that the llm completion always fails in this instance so this is redundant.
+- "invalid unicode output": This is pretty frequent at high temperatures. When the Unicode isn't valid the prompt fails.
+- "wrong number of json blocks": The script is using a default 'json setting' that outputs the output in a json block. This is triggered if the llm output contains more then one json block.
+- "wrong_keys": If the output does not contain the specified variables
+- "wrong_case_number": If the output case number does not match the input record case number
+- "ok":if no errors are detected
+
+```{r libraries, directories and functions}
+library(tidyverse)
+
+toBox <- "~/Library/CloudStorage/Box-Box/"
+#toBox <- "C:/Users/15303/Box/"
+
+outputDir <- paste0(toBox,"Projects/LLM/llm_vet_records/output/explore_output_format/")
+
+plot_invalid_output <- function(llm_response_parsed) {
+  
+  output_color_scale <- c(
+    "wrong number of json blocks" = "#D8B365",
+    "couldn't parse json" = "#D8B365" , 
+    "wrong_keys" = "#D8B365",
+    "wrong_case_number" = "#F6E8C3",
+    "output_not_in_unicode" = "#5AB4AC",
+    "invalid unicode output" = "#5AB4AC")
+
+  output_label <- c(
+    "wrong number of json blocks" = "Invalid JSON format",
+    "couldn't parse json" = "Invalid JSON format",
+    "wrong_keys" = "Wrong variable names",
+    "wrong_case_number" = "Wrong case number",
+    "output_not_in_unicode" = "Failed completion",
+    "invalid unicode output" = "Failed completion")
+
+  all_temperatures <- data.frame(temperature = unique(llm_response_parsed$temperature))
+  
+  total_records <- llm_response_parsed %>%
+    group_by(temperature) %>%
+    summarize(total = n())
+  
+  error_type_data <- llm_response_parsed %>%
+    filter(status != "ok") %>%
+    group_by(temperature, status) %>%
+    summarize(count = n()) %>%
+    right_join(all_temperatures, by = "temperature") %>%
+    left_join(total_records, by = "temperature") %>%
+    mutate(count = ifelse(is.na(count), 0, count),
+           percentage = (count / total) * 100)
+  
+  error_plot <- ggplot(error_type_data, aes(x = factor(temperature), y = percentage, fill = status)) +
+    geom_bar(stat = "identity", position = "stack") +
+    labs(x = "Temperature", y = "Percentages (%)", fill = "Output issues") +
+    scale_fill_manual(values = output_color_scale,  labels = output_label) +
+    theme_bw() +
+    theme(legend.position = "right", 
+          legend.box = "horizontal",  
+          legend.direction = "vertical",  
+          legend.key.height = unit(0.1, "in"),  
+          legend.key.width = unit(0.1, "in"),  
+          legend.spacing.y = unit(0.05, "in"),  
+          axis.text = element_text(size = 9, family = "Arial"),
+          axis.title = element_text(size = 9, family = "Arial"),
+          strip.text = element_text(size = 9, family = "Arial"),
+          legend.title = element_text(size = 9, family = "Arial")) +
+    ylim(0, 100)
+  
+  return(error_plot)
+}
+
+summarize_invalid_output <- function(llm_response_parsed) {
+  
+  all_temperatures <- data.frame(temperature = unique(llm_response_parsed$temperature))
+  
+  total_records <- llm_response_parsed %>%
+    group_by(temperature) %>%
+    summarize(total = n())
+  
+  error_type_data <- llm_response_parsed %>%
+    filter(status != "ok") %>%
+    group_by(temperature, status) %>%
+    summarize(count = n()) %>%
+    right_join(all_temperatures, by = "temperature") %>%
+    left_join(total_records, by = "temperature") %>%
+    mutate(count = ifelse(is.na(count), 0, count),
+           percentage = (count / total) * 100)
+  
+  output_error_summary <- error_type_data %>%
+    select(temperature, status, percentage) %>%
+    pivot_wider(names_from = status, values_from = percentage, values_fill = list(percentage = 0)) %>%
+    select(-'NA') %>%
+    rename_with(~ paste0(.x, " percentage"), -temperature) %>%
+    arrange(as.numeric(temperature))
+  
+  return(output_error_summary)
+}
+
+```
+
+## Explore tuning GPT4o
+### Input
+- tuning_GPT4o_parsed (intermediates/parse_llm_response)
+### Output
+- FS1_tuning_GPT4o_invalid_output.png (output/explore_output_format)
+- tuning_GPT4o_invalid_output_summary.csv (output/explore_output_format)
+```{r explore tuning GPT4o}
+tuning_GPT4o_parsed <- readRDS(paste0(toBox, "Projects/LLM/llm_vet_records/intermediates/parse_llm_output/tuning_GPT4o_parsed.rds"))
+
+#Plot invalid format
+tuning_GPT4o_invalid_output_plot <- plot_invalid_output(tuning_GPT4o_parsed)
+print(tuning_GPT4o_invalid_output_plot)
+
+# Define the file path
+png_file_path <- file.path(outputDir, "FS1_tuning_GPT4o_invalid_output.png")
+
+# Save the combined plot to a PNG file using ggsave
+ggsave(filename = png_file_path, plot = tuning_GPT4o_invalid_output_plot, width = 85, height = 45, units = "mm", dpi = 300)
+
+#Summarize invalid format
+tuning_GPT4o_invalid_output_summary <- summarize_invalid_output(tuning_GPT4o_parsed)
+print(tuning_GPT4o_invalid_output_summary)
+
+write_csv(tuning_GPT4o_invalid_output_summary, paste0(outputDir, "tuning_GPT4o_invalid_output_summary.csv" ))
+```
+## Explore test GPT4o
+### Input
+- test_GPT4o_parsed (intermediates/parse_llm_response)
+
+```{r explore tuning GPT4o}
+test_GPT4o_parsed <- readRDS(paste0(toBox, "Projects/LLM/llm_vet_records/intermediates/parse_llm_output/test_GPT4o_parsed.rds"))
+
+#Plot invalid format
+test_GPT4o_invalid_output_plot <- plot_invalid_output(test_GPT4o_parsed)
+print(test_GPT4o_invalid_output_plot)
+
+
+
+#Summarize invalid format
+test_GPT4o_invalid_output_summary <- summarize_invalid_output(test_GPT4o_parsed)
+print(test_GPT4o_invalid_output_summary)
+
+
+```

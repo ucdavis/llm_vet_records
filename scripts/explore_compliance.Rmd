@@ -1,0 +1,435 @@
+---
+title: "explore_compliance"
+author: "Wulcan"
+date: "2024-08-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Objective
+Explore how well LLM and Human respondents comply with instructions, both when it comes to output format, instructions for how to answer true/false questions (no NA) and instructions on how to format citations.
+
+## Issues/Deviations
+Compliance to output format (JSON) and true/false questions (no NA) only applies to the LLMs since the human survey has an automated output format and is set to require responses to all questions.
+
+```{r libraries, directories, and functions}
+library(tidyverse)
+library(readxl)
+
+
+toBox <- "~/Library/CloudStorage/Box-Box/"
+
+inputDir <- paste0(toBox,"Projects/LLM/llm_vet_records/input/")
+
+intermediatesDir <- paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/explore_compliance/")
+
+outputDir <- paste0(toBox,"Projects/LLM/llm_vet_records/output/explore_compliance/")
+
+# Function to count the number of text strings enclosed in double quotes
+  count_citations <- function(reference) {
+    if (is.na(reference)) {
+      return(0)
+    }
+    matches <- gregexpr('"[^"]+"', reference)
+    return(length(matches[[1]]))
+  }
+
+
+process_citations <- function(response_long, corrected_references, manually_assessed) {
+  
+  # Function to check if the reference is correctly formatted
+  check_quotations <- function(reference) {
+    if (is.na(reference)) {
+      return(TRUE)
+    }
+    pattern <- '^(\\"[^\\"]+\\"( \\"[^\\"]+\\"| \\"[^\\"]+\\" )*)$'
+    grepl(pattern, reference)
+  }
+  
+  # Function to count the number of text strings enclosed in double quotes
+  count_citations <- function(reference) {
+    if (is.na(reference)) {
+      return(0)
+    }
+    matches <- gregexpr('"[^"]+"', reference)
+    return(length(matches[[1]]))
+  }
+  
+  # Function to split the text strings and remove quotation marks
+  split_citations <- function(reference) {
+    text_strings <- unlist(str_extract_all(reference, '"[^"]+"'))
+    text_strings <- str_replace_all(text_strings, '"', '')
+    return(text_strings)
+  }
+  
+  # Function to clean up citation from minor punctation capitalization and spacing issues
+  clean_text <- function(text) {
+    text %>%
+      str_to_lower() %>%
+      str_replace_all("[[:punct:]]", "") %>%
+      str_replace_all("\\s+", " ") %>%
+      str_trim()
+  }
+  
+
+
+  # Process response_long
+  response <- response_long %>%
+    group_by(case, question, respondent_type) %>%
+    mutate(
+      prompt = coalesce(prompt, first(na.omit(prompt))),
+      record = coalesce(record, first(na.omit(record)))
+    ) %>%
+    ungroup() %>%
+    mutate(reference = str_trim(reference)) %>%
+    mutate(reference = ifelse(reference == "NA", NA, reference)) %>%
+    mutate(correct_JSON_format = is.na(error),
+           provided_classification_response = !is.na(response),
+           citations_in_quotations_and_separated_by_space = sapply(reference, check_quotations))
+
+  # Join response with corrected_references
+  response_corrected <- response %>%
+    select(-reference) %>%
+    left_join(corrected_references, by = c("case", "question", "respondent_type", "respondent_no", "temperature"))
+
+  # Split citations
+  max_citations <- max(response_corrected$n_citations)
+  citations_split <- lapply(response_corrected$reference, split_citations)
+
+  for (i in 1:max_citations) {
+    response_corrected[[paste0("ref_", i)]] <- sapply(citations_split, function(x) if (length(x) >= i) x[i] else NA)
+  }
+
+  # Pivot longer
+  response_corrected_long <- response_corrected %>%
+    pivot_longer(
+      cols = starts_with("ref_"),
+      names_to = "ref_no",
+      names_prefix = "ref_",
+      values_to = "ref",
+      values_drop_na = TRUE
+    ) %>%
+    mutate(ref_no = as.integer(ref_no)) %>%
+    arrange(case, ref_no) %>%
+    mutate(citation_matches_record = case_when(
+      is.na(record) ~ FALSE,
+      TRUE ~ str_detect(record, fixed(ref))
+    )) %>%
+    mutate(citation_contains_ellipse = str_detect(ref, fixed("..."))) %>%
+    mutate(
+      cleaned_ref = clean_text(ref),
+      cleaned_record = clean_text(record)
+    ) %>%
+    mutate(matches_if_clean = case_when(
+      is.na(cleaned_record) ~ FALSE,
+      TRUE ~ str_detect(cleaned_record, fixed(cleaned_ref))
+    )) %>%
+    mutate(citation_deviates_in_capitalization_punctuation_or_whitespace = if_else(!citation_matches_record & matches_if_clean, TRUE, FALSE)) %>%
+    mutate(citation_includes_field_name = str_detect(cleaned_ref, "pertinent history|presenting complaint")) %>%
+    mutate(citations_complies_with_instructions = if_else(citations_in_quotations_and_separated_by_space & citation_matches_record, TRUE, FALSE)) %>%
+    mutate(response_complies_with_instructions = ifelse(correct_JSON_format & provided_classification_response & citations_complies_with_instructions, TRUE, FALSE))
+
+  # Create compliance dataframe
+  compliance <- response_corrected_long %>% 
+    select( respondent_type, respondent_no, temperature, case, record, question, response, reference, n_citations, ref_no, ref, 
+           response_complies_with_instructions, correct_JSON_format, provided_classification_response, 
+           citations_complies_with_instructions, citations_in_quotations_and_separated_by_space, 
+           citation_matches_record, citation_deviates_in_capitalization_punctuation_or_whitespace, 
+           citation_contains_ellipse, citation_includes_field_name)
+
+
+  # Create citation_deviations_humans_temp0 dataframe
+  citation_deviations_humans_temp0 <- compliance %>%
+    filter(temperature == "Humans" | temperature == 0) %>%
+    left_join(manually_assessed, by = c("respondent_type", "respondent_no", "temperature", "question", "ref_no", "case")) %>%
+    mutate(
+      citation_deviates_in_capitalization_punctuation_or_whitespace = 
+        if_else(citation_deviates_in_capitalization_punctuation_or_whitespace | str_detect(error, "added missing space"), TRUE, FALSE),
+      
+      shortened_text_in_citation = 
+        if_else(citation_contains_ellipse | str_detect(error, "shortened reference with retained meaning|grouped and reordered strings|shortened reference with altered meaning"), TRUE, FALSE),
+      
+      citation_includes_field_name_or_question = 
+        if_else(citation_includes_field_name | str_detect(error, "variable name included|question_included"), TRUE, FALSE),
+      
+      citation_contains_paraphrasing = if_else(str_detect(error, "rephrased with retained meaning"), TRUE, FALSE),
+      
+      citation_deviation_impacts_meaning = ifelse(!retained_meaning, TRUE, FALSE)
+    ) %>%
+    mutate(
+      citation_deviates_in_capitalization_punctuation_or_whitespace = replace_na(citation_deviates_in_capitalization_punctuation_or_whitespace, FALSE),
+      shortened_text_in_citation = replace_na(shortened_text_in_citation, FALSE),
+      citation_includes_field_name_or_question = replace_na(citation_includes_field_name_or_question, FALSE),
+      citation_contains_paraphrasing = replace_na(citation_contains_paraphrasing, FALSE),
+      citation_deviation_impacts_meaning = replace_na(citation_deviation_impacts_meaning, FALSE)
+    ) %>%
+    select(respondent_type, respondent_no, temperature, case, record, question, response, reference, ref_no, ref, 
+           response_complies_with_instructions, correct_JSON_format, provided_classification_response, 
+           citations_complies_with_instructions, citations_in_quotations_and_separated_by_space, 
+           citation_deviates_in_capitalization_punctuation_or_whitespace, shortened_text_in_citation, citation_contains_paraphrasing,
+           citation_includes_field_name_or_question, citation_deviation_impacts_meaning)
+  
+  aggregated_citation_deviations <- citation_deviations_humans_temp0 %>%
+    group_by(respondent_type, respondent_no, temperature, case, record, question, response, reference) %>%
+  summarise(
+    response_complies_with_instructions = all(response_complies_with_instructions),  # TRUE only if all are TRUE
+    citations_complies_with_instructions = all(citations_complies_with_instructions), # FALSE if any are FALSE
+    correct_JSON_format = first(correct_JSON_format),  # Assuming these don't vary
+    provided_classification_response = first(provided_classification_response),
+    citations_in_quotations_and_separated_by_space = any(citations_in_quotations_and_separated_by_space), 
+    citation_deviates_in_capitalization_punctuation_or_whitespace = any(citation_deviates_in_capitalization_punctuation_or_whitespace),
+    citation_contains_paraphrasing = any(citation_contains_paraphrasing),
+    shortened_text_in_citation = any(shortened_text_in_citation),
+    citation_includes_field_name_or_question = any(citation_includes_field_name_or_question), 
+    
+    citation_deviation_impacts_meaning = any(citation_deviation_impacts_meaning)
+  ) %>%
+    ungroup()
+  
+  response_temp_0 <- response_corrected %>%
+  select(respondent_type, respondent_no, temperature, case, record, question, response, reference, correct_JSON_format, provided_classification_response, citations_in_quotations_and_separated_by_space) %>%
+    filter(temperature == "Humans" | temperature == 0)
+  
+  response_temp_0_citation_deviations <- response_temp_0 %>%
+    left_join(aggregated_citation_deviations, by = c( "respondent_type", "respondent_no", "temperature", "case", "record", "question", "response", "reference", "correct_JSON_format", "provided_classification_response", "citations_in_quotations_and_separated_by_space")) %>%
+    mutate(response_complies_with_instructions = replace_na(response_complies_with_instructions, TRUE),
+           citations_complies_with_instructions = replace_na(citations_complies_with_instructions, TRUE),
+           citation_deviates_in_capitalization_punctuation_or_whitespace = replace_na(citation_deviates_in_capitalization_punctuation_or_whitespace, FALSE),
+           shortened_text_in_citation = replace_na(shortened_text_in_citation, FALSE),
+           citation_includes_field_name_or_question = replace_na(citation_includes_field_name_or_question, FALSE),
+           citation_deviation_impacts_meaning = replace_na(citation_deviation_impacts_meaning, FALSE)) %>%
+    mutate(citations_deviates_in_quotation_capitalization_punctuation_or_whitespace = 
+           (!citations_in_quotations_and_separated_by_space | 
+            citation_deviates_in_capitalization_punctuation_or_whitespace) &
+           !shortened_text_in_citation &
+           !citation_includes_field_name_or_question & !citation_contains_paraphrasing)
+
+ # Calculate total number of observations per temperature for response_temp_0_citation_deviations
+  total_per_temperature_deviations <- response_temp_0_citation_deviations %>%
+    group_by(temperature) %>%
+    summarise(total_observations = n(), .groups = 'drop')
+  
+  # Function to calculate compliance count and percentage for a given variable
+  calculate_deviation_summary <- function(data, variable) {
+    data %>%
+      filter(!!sym(variable)) %>%
+      group_by(temperature) %>%
+      summarise(
+        deviation_count = n(),
+        .groups = 'drop'
+      ) %>%
+      left_join(total_per_temperature_deviations, by = "temperature") %>%
+      mutate(
+        deviation_percentage = (deviation_count / total_observations) * 100,
+        variable = variable
+      ) %>%
+      select(temperature, variable, total_observations, deviation_count, deviation_percentage)
+  }
+  
+  # List of variables to summarize for deviations
+  variables_to_summarize_deviations <- c(
+    "citations_deviates_in_quotation_capitalization_punctuation_or_whitespace",
+    "shortened_text_in_citation",
+    "citation_includes_field_name_or_question",
+    "citation_contains_paraphrasing",
+    "citation_deviation_impacts_meaning"
+  )
+  
+  
+  # Apply the function to each variable and bind the results
+  summary_deviations <- purrr::map_df(variables_to_summarize_deviations, ~ calculate_deviation_summary(response_temp_0_citation_deviations, .x))    
+  
+  summary_deviations_for_plot <- summary_deviations %>%
+  filter(variable != "citation_deviation_impacts_meaning")
+
+# Create the stacked bar plot
+citation_deviation_plot <- ggplot(summary_deviations_for_plot, aes(x = temperature, y = deviation_percentage, fill = variable)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(
+    x = "Temperature",
+    y = "Deviation Percentage (%)",
+    fill = "Deviation Type"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text = element_text(size = 9, family = "Arial"),
+    axis.title = element_text(size = 9, family = "Arial"),
+    strip.text = element_text(size = 9, family = "Arial"),
+    legend.title = element_text(size = 9, family = "Arial"),
+    legend.position = "bottom",  # Position the legend at the bottom
+    legend.direction = "horizontal",  # Arrange the legend items horizontally
+    legend.key.height = unit(0.2, "in"),  # Adjust the height of the legend key
+    legend.key.width = unit(0.4, "in")  # Adjust the width of the legend key
+  )
+
+# full dataset
+aggregated_compliance <- compliance %>%
+  group_by( respondent_type, respondent_no, temperature, case, record, question, response, reference, n_citations) %>%
+  summarise(
+    response_complies_with_instructions = all(response_complies_with_instructions),  # TRUE only if all are TRUE
+    citations_complies_with_instructions = all(citations_complies_with_instructions), # FALSE if any are FALSE
+    correct_JSON_format = first(correct_JSON_format),  # Assuming these don't vary
+    provided_classification_response = first(provided_classification_response)  # Assuming these don't vary
+  ) %>%
+  ungroup()
+
+# Select the relevant columns from response_corrected
+response_corrected_selected <- response_corrected %>%
+  select(respondent_type, respondent_no, temperature, case, record, question, response, reference, correct_JSON_format, provided_classification_response)
+
+# Merge the selected columns from response_corrected with the aggregated compliance data
+response_compliance <- response_corrected_selected %>%
+  left_join(aggregated_compliance, by = c("respondent_type", "respondent_no", "temperature", "case", "record", "question", "response", "reference", "correct_JSON_format", "provided_classification_response")) 
+
+# Select and reorder columns to match the desired output
+response_compliance <- response_compliance %>%
+  select(respondent_type, respondent_no, temperature, case, record, question, response, reference,
+         response_complies_with_instructions, correct_JSON_format, provided_classification_response, citations_complies_with_instructions) %>%
+  mutate(response_complies_with_instructions = replace_na(response_complies_with_instructions, TRUE),
+         citations_complies_with_instructions = replace_na(citations_complies_with_instructions, TRUE))
+
+# Calculate total number of observations per temperature
+total_per_temperature <- response_compliance %>%
+  group_by(temperature) %>%
+  summarise(total_observations = n(), .groups = 'drop')
+
+calculate_compliance_summary <- function(data, variable) {
+    data %>%
+      filter(!!sym(variable)) %>%
+      group_by(temperature) %>%
+      summarise(
+        compliance_count = n(),
+        .groups = 'drop'
+      ) %>%
+      left_join(total_per_temperature, by = "temperature") %>%
+      mutate(
+        compliance_percentage = (compliance_count / total_observations) * 100,
+        variable = variable
+      ) %>%
+      select(temperature, variable, total_observations, compliance_count, compliance_percentage)
+}
+
+variables_to_summarize <- c(
+    "response_complies_with_instructions",
+    "correct_JSON_format",
+    "provided_classification_response",
+    "citations_complies_with_instructions"
+  )
+
+summary_compliance <- purrr::map_df(variables_to_summarize, ~ calculate_compliance_summary(response_compliance, .x))
+
+compliance_by_temp <- ggplot(
+    summary_compliance %>% filter(variable == "citations_complies_with_instructions"), 
+    aes(x = temperature, y = compliance_percentage)
+  ) +
+    geom_bar(stat = "identity") +
+    labs(
+      x = "Temperature",
+      y = "Compliance (%)"
+    ) +
+    theme_bw() +
+    theme(
+      legend.position = "none", 
+      legend.box = "horizontal",  # Display legend items horizontally
+      legend.direction = "vertical",  # Adjust the direction of legend items
+      legend.key.height = unit(0.1, "in"),  # Adjust the height of the legend key
+      legend.key.width = unit(0.1, "in"),  # Adjust the width of the legend key
+      legend.spacing.y = unit(0.05, "in"),  # Adjust the vertical spacing 
+      axis.text = element_text(size = 9, family = "Arial"),
+      axis.title = element_text(size = 9, family = "Arial"),
+      strip.text = element_text(size = 9, family = "Arial"),
+      legend.title = element_text(size = 9, family = "Arial")
+    )
+
+  
+  return(list(
+    response_compliance = response_compliance, 
+    summary_compliance = summary_compliance, 
+    compliance_by_temp = compliance_by_temp, 
+    response_temp_0_citation_deviations = response_temp_0_citation_deviations,
+    summary_deviations = summary_deviations,
+    citation_deviation_plot = citation_deviation_plot
+  ))
+}
+```
+
+
+## Explore compliance test GPT4o
+### Input 
+- long_test_GPT4o.rds (intermediates/add_mode)
+- corrected_references (inputDir, manually corrected quotation marks and single spaces between citation strings)
+- reference_mismatch.xlsx(inputDir, manually assessed and categorized mismatched citations for humans and temp 0)
+### Output
+- response_compliance_test_GPT4o (intermediates/explore_compliance)
+- citation_deviation_temp0_test_GPT4o (intermediates/explore_compliance)
+- compliance_by_temp_test_gpt4o.png (output/explore_compliance)
+- compliance_summary_test_GPT4o.csv (output/explore_compliance)
+- F2B_compliance_test_GPT4o (output/explore_compliance)
+
+### Issues/Deviations
+In the summary table "summary_deviations_GPT-4o the deviation count is two because the same citation applies to constipation and diarrhea (mentions defectation). Since the citation refers to diarrhea it is simplified to 1 in the
+
+```{r explore compliance test GPT4o}
+response_long <- readRDS(paste0(toBox, "Projects/LLM/llm_vet_records/intermediates/add_mode/long_test_GPT4o.rds")) 
+
+# Process corrected_references
+corrected_references <- read_xlsx(paste0(inputDir, "corrected_references.xlsx")) %>%
+  mutate(respondent_type = ifelse(respondent_type == "human", "Humans", respondent_type),
+         respondent_type = ifelse(respondent_type == "GPT4o", "GPT-4o", respondent_type),
+         temperature = ifelse(temperature == "human", "Humans", temperature)) %>%
+  select(case, question, respondent_type, respondent_no, temperature, reference, formatting_error) %>%
+  rename(quotation_deviation = formatting_error) %>%
+  mutate(n_citations = sapply(reference, count_citations))
+
+# Process manually_assessed
+manually_assessed <- read_xlsx(paste0(inputDir, "reference_mismatch.xlsx")) %>%
+  mutate(respondent_type = ifelse(respondent_type == "human", "Humans", respondent_type),
+         respondent_type = ifelse(respondent_type == "GPT4o", "GPT-4o", respondent_type),
+         temperature = ifelse(temperature == "human", "Humans", temperature)) %>%
+  rename(retained_meaning = `retained meaning`) %>%
+  select(respondent_type, respondent_no, temperature, case, question, ref_no, error, retained_meaning)
+
+
+
+result <- process_citations(response_long, corrected_references, manually_assessed)
+
+response_compliance_test_GPT4o <- result$response_compliance
+
+citation_deviation_temp0_test_GPT4o <- result$response_temp_0_citation_deviations
+
+
+summary_compliance_GPT4o <- result$summary_compliance
+compliance_by_temp_test_GPT4o <- result$compliance_by_temp
+summary_deviations_GPT4o <- result$summary_deviations
+citation_deviation_plot <- result$citation_deviation_plot
+respons_temp0_citation_deviations_GPT4o <- result$response_temp_0_citation_deviations
+response_compliance_GPT4o <- result$response_compliance
+
+print(compliance_by_temp_test_GPT4o
+      )
+print(summary_compliance_GPT4o)
+print(summary_deviations_GPT4o)
+
+
+# Define the file path
+png_file_path <- file.path(outputDir, "F2B_compliance_test_gpt4o.png")
+
+# Save the combined plot to a PNG file using ggsave
+ggsave(filename = png_file_path, plot = compliance_by_temp_test_GPT4o, width = 85, height = 60, units = "mm", dpi = 300)
+
+write_csv(result$summary_compliance, paste0(outputDir, "compliance_summary_test_GPT4o.csv"))
+write_csv(result$summary_deviations, paste0(outputDir, "citation_deviations_summary_test_GPT4o_temp0.csv"))
+
+saveRDS(response_compliance_test_GPT4o, paste0(intermediatesDir, "response_compliance_test_GPT4o.rds"))
+
+saveRDS(citation_deviation_temp0_test_GPT4o, paste0(intermediatesDir, "citation_deviation_temp0_test_GPT4o.rds"))
+```
+
+
+
+
+
+

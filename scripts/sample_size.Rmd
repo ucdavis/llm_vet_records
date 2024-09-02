@@ -1,0 +1,53 @@
+---
+title: "sample_size"
+author: "Wulcan"
+date: "2024-06-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Objective
+Calculate the sample size needed to estimate accuracy of LLM for extracting 
+clinical information from veterinary records. 
+
+### Study design
+We are comparing a dichotomized index test (true/false LLM) to a dichotomized reference standard (true/false human majority opinion).
+
+### Accuracy metrics
+Sensitivity, Specicificy, positive predicitive value and negative predictive value.
+
+### Sample size considerations
+To estimate sample size for studies of the sensitivity/specificty of a single test,
+Obuchowski (1998) provides a formula. For a condition with a prevalence below 50% 
+sensitivity calculations will require a higher value then specificity.
+In addition to deciding the acceptable margin of error and type I error rate,
+the calculation requires an estimate of the sensitvity and prevalence of the condition.
+
+Based on previous studies in humans we expect the sensitvity of the LLM to be ~ 95%
+Based on the prevalence of the clinical signs of interests in a pilot set of 100 cases 
+we expect the median prevalence of clinical signs investigated to be 15% 
+
+A lower prevalence and/or sensitivity then expected will result in a wider confidence interval than intended. For low prevalence clinical signs (e.g. polyphagia and constipation we will probably have wide confidence intervals. Sizing the study after these would not be feasible)
+
+### Sample size formula for constructing confidence intervals of length L:
+```{r}
+ci_length <- 0.07  #intended length of confidence interval
+alpha <- 0.05 #type I error rate
+sensitivity_estimate <- 0.95
+prevalence_estimate <- 0.15
+
+z_alpha_two_tail <- abs(qnorm(alpha_adjusted/2, lower.tail = TRUE))
+
+
+variance_sensitvity_estimate <- sensitivity_estimate * (1-sensitivity_estimate) #binomial
+
+n_true <- z_alpha_two_tail^2 * variance_sensitvity_estimate/ (ci_length^2) #the required number of trues
+
+n_both <- n_true / prevalence_estimate #required total number (trues and falses)
+```
+
+
+

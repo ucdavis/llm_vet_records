@@ -1,0 +1,213 @@
+---
+title: "prompt_engineering"
+author: "Wulcan"
+date: "2024-08-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, directories and functions}
+library(tidyverse)
+library(readxl)
+
+toBox <- "~/Library/CloudStorage/Box-Box/"
+#toBox <- "C:/Users/15303/Box/"
+inputDir <- paste0(toBox,"Projects/LLM/llm_vet_records/input/")
+intermediatesDir <- paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/prompt_engineering/")
+
+promptDir <- paste0(toBox,"Projects/LLM/llm_vet_records/prompts/")
+
+# Replace atypical quotation marks 
+clean_quotation_marks <- function(x) {
+  str_replace_all(x, "[“”]", "\"")
+}
+```
+
+# Prompt engineering
+
+## Objective
+Troubleshoot and adjust prompt. 
+
+## Input
+- tuning_prompt_engineering.xlsx (intermediates/prompt_engineering)
+
+
+## Intermediates
+- prompt_tuning_1 (prompts/)
+- prompt_tuning_2 (prompts/)
+- prompt_tuning_3 (prompts/)
+- prompt_tuning_4 (prompts/)
+- prompt_tuning_5 (prompts/)
+- prompt_tuning_6 (prompts/)
+- prompt_tuning_7 (prompts/)
+- prompt_tuning_8 (prompts/)
+
+#### Methods
+The prompt and tuning records used for the tuning survey was fed to GPT4o and responses recorded. Discrepancies against humans were evaluated and the prompt adjusted. This was repeated until reasonable alignment was achieved. Adjustments were made for 1. Instructions on how to answer true/false questions 2. Instructions on how to format copy-paste text in the field 'reference'. 
+
+1. Adjustments for how to answer true/false questions. (1-6 increasingly stringent, 7-8 looser)
+- Prompt 1: (original, the only one used for the human tuning survey)
+  - If the text indicates that the clinical sign is currently present, answer TRUE. Otherwise answer FALSE.
+  - Clinical signs occurring within the previous week should be considered current even if the clinical sign is waxing and waning, and not present at the precise moment of the visit.
+  - Always provide an answer. Answers can be only TRUE or FALSE.
+
+- Prompt 2 (attempted to clarify instructions without changing them)
+  - If the text indicates that the clinical sign is currently present, answer TRUE. 
+  - If the text indicates that the clinical sign is not currently present, but that is has been present within the last week, answer TRUE.
+  - If the text indicates that the clinical sign has been historically present **but resolved completely more than a week ago**, answer FALSE.
+  - Always provide an answer. Answers can be only TRUE or FALSE.
+  
+- Prompt 3 (loosening up on a too stringent requirement for a historic sign to be false)
+  - If the text indicates that the clinical sign is currently present, answer TRUE. 
+  - If the text indicates that a clinical sign was present at a historic date (more than a week ago) but the **clinical problem is not mentioned in the current status**, answer FALSE.
+  - Always provide an answer. Answers can be only TRUE or FALSE.
+  
+- Prompt 4 (added instruction to lean towards true when uncertain)
+  - If the text indicates that the clinical sign is currently present, answer TRUE. 
+  - If the text indicates that a clinical sign was present at a historic date (more than a week ago) but the clinical problem is not mentioned in the current status, answer FALSE.
+  - **If you are 50/50 on whether to answer TRUE or FALSE, answer TRUE**
+  - Always provide an answer. Answers can be only TRUE or FALSE.
+  
+- Prompt 5 (further emphasis on considering everything within the last week true)
+  - If the text indicates that the clinical sign is currently present, answer TRUE. 
+  - If the text indicates that the clinical sign occurred within the last week, answer TRUE, **even if the record specifically states that the sign did not occur the day of the visit**.
+  - If the text indicates that a clinical sign was present at a historic date (more than a week ago) but the clinical problem is not mentioned in the current status, answer FALSE.
+  - If you are 50/50 on whether to answer TRUE or FALSE, answer TRUE
+  - Always provide an answer. Answers can be only TRUE or FALSE.
+  
+- Prompt 6 (specify instructions for what to consider false)
+  - If the text indicates that the clinical sign is currently present, answer TRUE. 
+  - If the text indicates that the clinical sign occurred within the last week, answer TRUE, even if the record specifically states that the sign did not occur the day of the visit.
+  - If the text indicates that a clinical sign was present at a historic date (more than a week ago) and the clinical problem is either not mentioned in the current status, **or mentioned as absent in the current status**, answer FALSE.
+  - If you are 50/50 on whether to answer TRUE or FALSE, answer TRUE
+  - Always provide an answer. Answers can be only TRUE or FALSE.
+  
+- Prompt 7 (looser interpretation of 'recent'; instruction of "no ellipses"; and to include spaces between citation marks when citing multiple chunks)
+  - If the text indicates that the clinical sign is currently or recently present, answer “TRUE”. 
+  - If the text indicates that the clinical sign **occurred recently**, answer “TRUE”, even if the record specifically states that the sign is not currently present.
+  - If the text indicates that a clinical sign was present at a historic date **(not recent)** and the clinical problem is either not mentioned in the current status, or mentioned as absent in the current status, answer “FALSE”.
+  - If you are 50/50 on whether to answer “TRUE” or “FALSE”, answer “TRUE”
+  - Always provide an answer. Answers can be only “TRUE” or “FALSE”.
+
+- Prompt 8 (minor formatting edit of prompt, no major changes in instructions)
+
+2. Instructions on format for reference field (7-8 added instructions)
+- Prompts 1-6:
+  - Copy-paste all text (including negative mentions) referring to the topic into the field <Reference>. 
+  - Surround text by quotation marks. 
+  - If text is copied from multiple locations in the record, surround each chunk by quotation marks.
+  - If there is no mention (positive or negative) related to the topic in the text, fill in NA.
+  - Only provide copy-pasted text in the field <Reference>.
+- Prompt 7 (introduce instructions on ellipses and separation between text chunks)
+  - Copy-Paste text: Copy-paste all text (including negative mentions) referring to the topic into the field “Reference”. 
+  - Use quotation marks: Surround each text chunk by quotation marks. 
+  - Multiple locations: If text is copied from multiple locations in the record, surround each chunk by quotation marks **separated by white space**.
+  - No mention: If there is no mention (positive or negative) related to the topic in the text, fill in “NA”.
+  - **No ellipses: Do not shorten references by adding “…” within quotations.**  
+  - Copy-pasted text only: Only provide copy-pasted text in the field “Reference”.
+
+
+#### Interpretation
+- Human disagreement: 
+  - For most records and questions there was complete agreement between the humans and the llms regardless of prompt. This included all records for question 'Diarrhea?' and 'Constipation?', 8/10 records for 'Polyphagia?',  'Weight loss?' and 'Decreased appetite?' and 7/10 records for 'Vomiting?'. 
+  
+  - For two records there were disagreement between the humans for one or two question each (Case 49: 'Polyphagia?' and 'Weight loss?' and Case 79: 'Decreased appetite?'). For case 49, the human answering false did not reference any text, or did not reference the full text (suspect inattention). The llm agreed with the human who answered 'true'. For case 79 the humans and the llm all referenced the same text but answered differently. Upon review the text was ambiguous.
+
+- LLM errors: There were four questions where the humans agreed and at least one LLM disagreed for at least one record. Most errors were for the question 'Vomiting?' (three records, 17, 30 and 57), the others had just one error record each ('Decreased appetite?': Case 50, 'Polyphagia' Case 17 and 'Weight loss' Case 17). For all of these, the LLMs consistently referenced the same text as the humans (interpretation error). 
+  - Vomiting. Two errors were instances where the llm classified vomiting as FALSE for intermittent vomiting (an unacceptable error since chronic vomiting is typically intermittent). For one record (case 57) the llm the vomiting was an ongoing problem but did not occur under treatment with an antiemetic (last two weeks). For this case the humans entered 'false' and the llms 'true' for some iterations when 'recent' was defined as within the last week (prompt 1-6). The issues were resolved by giving the llm free reigns to interpret 'recent' (not tested for humans)
+  - Decreased appetite. Record 50. The text mentioned vomiting 9 months ago and did not mention it (negatively or positively) for the current status. Both humans answered false (when prompted to consider symptoms within the last week recent) and the llms responses varied (both when given the one week criteria and free reign to interpret recent). This is an acceptable error since the text is ambiguous.
+  - Polyphagia: Record 17. The text mentions polyphagia but there is ambiguity on when it occured. It was however clear that it had not occurred within the last week. Both humans answered 'false' and all 'llms' answered 'true' when recent was specified as within the last week. When recent was not specified the llm responses varied. This is an acceptable error since the text is ambiguous.
+  - Weight loss: Record 17. On a single iteration (prompt 8), when given free reigns to interpret 'recent' the LLM answered 'true' for weight loss occurring five months prior but specifically mentioned as not currently present. This is an acceptable error since the text is ambiguous.
+
+- Disobedience: The llms sometimes introduced ellipses into the comments, even when specifically prompted not to do so. All humans and all llm iterations had all references appropriately quoted and quotes separated by spaces (even before specifying the spaces in promt 7-8). 
+Summary: 
+- For humans the disagreements observed were interpreted as inattention (two questions) and interpretation of an ambiguous record (one question).
+- For the llm's all errors were interpretation errors, half were in ambiguous records (three). The other half were instances of intermittent vomiting, all resolved by being less specific in the time restraint for what is considered recent for the prompt. 
+- The llms sometimes disobediently inserted ellipses in quotes even when explicitly told not to. 
+- No responses contains hallucinations
+
+### Deviations
+Many of the llm tuning was performed with records deidentified stricter with dates changed for example. Sometimes deviations between humans and llms in references are because of this.
+
+
+```{r prompt engineering}
+ tuning_prompt_engineering <- read_xlsx(paste0(inputDir, "tuning_prompt_engineering.xlsx")) %>%
+  mutate(across(ends_with("_reference"), clean_quotation_marks)) %>%
+  mutate(across(ends_with("_reference"), ~na_if(.x, "NA"))) %>%
+  mutate(respondent = case_when(
+    ResponseId == "R_6eRHz90LIXWau4q" ~ "KLJ_p1",
+    ResponseId == "R_6fa7Mu2vCBrBaY7" ~ "JMW_p1",
+    ResponseId == "chatGPT_gpt4o_tuning_1" ~ "GPT4o_p1",
+    ResponseId == "chatGPT_gpt4o_tuning_2" ~ "GPT4o_p2",
+    ResponseId == "chatGPT_gpt4o_tuning_3" ~ "GPT4o_p3",
+    ResponseId == "chatGPT_gpt4o_tuning_4" ~ "GPT4o_p4",
+    ResponseId == "chatGPT_gpt4o_tuning_5" ~ "GPT4o_p5",
+    ResponseId == "chatGPT_gpt4o_tuning_6" ~ "GPT4o_p6_i1",
+    ResponseId == "chatGPT_gpt4o_tuning_6_repeat" ~ "GPT4o_p6_i2",
+    ResponseId == "chatGPT_gpt4o_tuning_7" ~ "GPT4o_p7",
+    ResponseId == "azure_playground_gpt4o_tuning_8" ~ "GPT4o_p8",
+    TRUE ~ ResponseId
+  ),
+  temperature = case_when(
+    ResponseId == "R_6eRHz90LIXWau4q" ~ "Humans",
+    ResponseId == "R_6fa7Mu2vCBrBaY7" ~ "Humans",
+    ResponseId == "chatGPT_gpt4o_tuning_1" ~ "p1",
+    ResponseId == "chatGPT_gpt4o_tuning_2" ~ "p2",
+    ResponseId == "chatGPT_gpt4o_tuning_3" ~ "p3",
+    ResponseId == "chatGPT_gpt4o_tuning_4" ~ "p4",
+    ResponseId == "chatGPT_gpt4o_tuning_5" ~ "p5",
+    ResponseId == "chatGPT_gpt4o_tuning_6" ~ "p6",
+    ResponseId == "chatGPT_gpt4o_tuning_6_repeat" ~ "p6",
+    ResponseId == "chatGPT_gpt4o_tuning_7" ~ "p7",
+    ResponseId == "azure_playground_gpt4o_tuning_8" ~ "p8",
+    TRUE ~ ResponseId
+  ),
+  respondent_no = case_when(
+    ResponseId == "R_6eRHz90LIXWau4q" ~ 1,
+    ResponseId == "R_6fa7Mu2vCBrBaY7" ~ 2,
+    ResponseId == "chatGPT_gpt4o_tuning_1" ~ 1,
+    ResponseId == "chatGPT_gpt4o_tuning_2" ~ 1,
+    ResponseId == "chatGPT_gpt4o_tuning_3" ~ 1,
+    ResponseId == "chatGPT_gpt4o_tuning_4" ~ 1,
+    ResponseId == "chatGPT_gpt4o_tuning_5" ~ 1,
+    ResponseId == "chatGPT_gpt4o_tuning_6" ~ 1,
+    ResponseId == "chatGPT_gpt4o_tuning_6_repeat" ~ 2,
+    ResponseId == "chatGPT_gpt4o_tuning_7" ~ 1,
+    ResponseId == "azure_playground_gpt4o_tuning_8" ~ 1,
+    TRUE ~ NA_real_
+  ),
+  respondent_type = case_when(
+    ResponseId == "R_6eRHz90LIXWau4q" ~ "Humans",
+    ResponseId == "R_6fa7Mu2vCBrBaY7" ~ "Humans",
+    ResponseId == "chatGPT_gpt4o_tuning_1" ~ "GPT-4o",
+    ResponseId == "chatGPT_gpt4o_tuning_2" ~ "GPT-4o",
+    ResponseId == "chatGPT_gpt4o_tuning_3" ~ "GPT-4o",
+    ResponseId == "chatGPT_gpt4o_tuning_4" ~ "GPT-4o",
+    ResponseId == "chatGPT_gpt4o_tuning_5" ~ "GPT-4o",
+    ResponseId == "chatGPT_gpt4o_tuning_6" ~ "GPT-4o",
+    ResponseId == "chatGPT_gpt4o_tuning_6_repeat" ~ "GPT-4o",
+    ResponseId == "chatGPT_gpt4o_tuning_7" ~ "GPT-4o",
+    ResponseId == "azure_playground_gpt4o_tuning_8" ~ "GPT-4o",
+    TRUE ~ ResponseId
+  ))
+
+# Set factor levels to order respondents
+tuning_prompt_engineering$ResponseId <- factor(tuning_prompt_engineering$ResponseId, levels = c(
+  "JMW_p1", "KLJ_p1", "GPT4o_p1", "GPT4o_p2", "GPT4o_p3", "GPT4o_p4", 
+  "GPT4o_p5", "GPT4o_p6_i1", "GPT4o_p6_i2", "GPT4o_p7", "GPT4o_p8"
+))
+
+# Ensure 'case' is numeric
+tuning_prompt_engineering$case <- as.numeric(tuning_prompt_engineering$case)
+
+# Ensure logical variables are logical type
+logical_vars <- c("decreased_appetite", "polyphagia", "vomiting", "diarrhea", "constipation", "weight_loss")
+tuning_prompt_engineering[logical_vars] <- lapply(tuning_prompt_engineering[logical_vars], as.logical)
+
+#saveRDS(tuning_prompt_engineering, paste0(intermediatesDir, "tuning_prompt_engineering.rds"))
+```
+
+

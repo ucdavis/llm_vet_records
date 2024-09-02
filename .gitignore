@@ -1,0 +1,10 @@
+input/*
+intermediates/*
+prompts/*
+.DS_Store
+experiment/*
+output/*
+script_drafts/*
+scripts/.DS_Store
+scripts/.RData
+scripts/.Rhistory

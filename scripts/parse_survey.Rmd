@@ -1,0 +1,234 @@
+---
+title: "parse_survey"
+author: "Wulcan"
+date: "2024-08-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Objective
+Parse qualtrics survey output and add mode and agreement if more then one respondent
+```{r libraries, directories and functions}
+library(tidyverse)
+library(readxl)
+
+toBox <- "~/Library/CloudStorage/Box-Box/"
+
+inputDir <- paste0(toBox,"Projects/LLM/llm_vet_records/input/")
+
+promptDir <- paste0(toBox,"Projects/LLM/llm_vet_records/prompts/")
+
+intermediatesDir <- paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/parse_survey/")
+
+# Replace atypical quotation marks
+clean_quotation_marks <- function(x) {
+  str_replace_all(x, "[“”]", "\"")
+}
+
+parse_survey_response <- function(survey_response, records, prompt) {
+  # Read and adjust qualtrics response
+  survey_response <- survey_response %>%
+    slice(-c(1, 2)) %>% 
+  mutate(across(ends_with("_reference"), clean_quotation_marks)) %>%
+    mutate(across(ends_with("_reference"), ~ ifelse(. == "", 'NA', .)))
+  
+  responseIds <- unique(survey_response$ResponseId)
+  humans <- paste0("human_", seq_along(responseIds))
+  name_mapping <- setNames(humans, responseIds)
+  
+ survey_response <- survey_response %>%
+  mutate(respondent = recode(ResponseId, !!!name_mapping),
+         respondent_type = "Humans",
+         respondent_no = as.numeric(gsub("human_", "", respondent))) 
+
+  # Select and reshape response columns
+  response_long <- survey_response %>%
+    pivot_longer(cols = starts_with("case_"),
+                 names_to = c("case", ".value"),
+                 names_pattern = "case_(\\d+)_(.*)") %>%
+    select(respondent, respondent_type, respondent_no, case,
+           appetite_reference, decreased_appetite, polyphagia, vomiting_reference, vomiting, defecation_reference, diarrhea, constipation, weight_reference, weight_loss) %>%
+    mutate(case = as.integer(case)) %>%
+    arrange(respondent, case)
+  
+  response_long$case <- as.numeric(response_long$case)
+  
+  logical_vars <- c("decreased_appetite", "polyphagia", "vomiting", "diarrhea", "constipation", "weight_loss")
+  
+  response_long[logical_vars] <- lapply(response_long[logical_vars], as.logical)
+
+  # Summarize timing data per record
+  timing_data <- survey_response %>%
+    select(respondent, starts_with("case_")) %>%
+    pivot_longer(cols = starts_with("case_"),
+                 names_to = c("case", "variable"),
+                 names_pattern = "case_(\\d+)_(.*)") %>%
+    filter(variable == "timing_Page.Submit") %>%
+    group_by(respondent, case) %>%
+    summarise(elapsed_time = sum(as.numeric(value), na.rm = TRUE), .groups = 'drop')
+
+  timing_data$case <- as.numeric(timing_data$case)
+
+  # Combine the response with timing and other details
+  response_parsed <- response_long %>%
+    left_join(timing_data, by = c("respondent", "case")) %>%
+    left_join(records, by = c("case" = "case")) %>%
+    mutate(
+           temperature = "Humans",
+           prompt = prompt,
+           record = paste(admission_date_visit, presentingComplaint_visit, pertinentHistory_visit, sep = " - "),
+           respondent = respondent) %>% 
+    mutate(across(c(vomiting, diarrhea, polyphagia, decreased_appetite, constipation, weight_loss), as.logical)) %>%
+    select(respondent, respondent_type, respondent_no, case, appetite_reference, decreased_appetite, polyphagia, vomiting_reference, vomiting, defecation_reference, diarrhea, constipation, weight_reference, weight_loss, elapsed_time, prompt, record, temperature)
+  
+
+# Generate the long format
+  response_parsed_long <- response_parsed %>%
+    pivot_longer(
+      cols = c(decreased_appetite, polyphagia, vomiting, diarrhea, constipation, weight_loss),
+      names_to = "question",
+      values_to = "response"
+    ) %>%
+    mutate(reference = case_when(
+      question %in% c("decreased_appetite", "polyphagia") ~ appetite_reference,
+      question == "vomiting" ~ vomiting_reference,
+      question %in% c("diarrhea", "constipation") ~ defecation_reference,
+      question == "weight_loss" ~ weight_reference
+    )) %>% 
+    select(-appetite_reference, -vomiting_reference, -defecation_reference, -weight_reference)
+
+  # Generate the wide format
+  response_parsed_wide <- response_parsed_long %>%
+    pivot_wider(names_from = respondent, values_from = c(response, reference), names_glue = "{.value}_{respondent}")
+
+# Check if there is more than one human respondent
+  if (length(humans) > 1) {
+    # Custom function to calculate the mode
+    calculate_mode <- function(x) {
+      uniq_x <- unique(x)
+      uniq_x[which.max(tabulate(match(x, uniq_x)))]
+    }
+
+    # Add the mode column to the wide dataframe
+    response_parsed_wide <- response_parsed_wide %>%
+      rowwise() %>%
+      mutate(mode = calculate_mode(c_across(starts_with("response_")))) %>%
+      ungroup()
+
+    # Function to calculate agreement score for each row
+    calculate_agreement <- function(df) {
+      # Get only the response columns
+      response_cols <- df %>% select(starts_with("response_"))
+      
+      # Calculate pairwise agreement for each pair of observers
+      pairwise_agreements <- combn(ncol(response_cols), 2, function(idx) {
+        response_cols[[idx[1]]] == response_cols[[idx[2]]]
+      })
+      
+      # Calculate the average agreement score
+      avg_agreement <- rowMeans(pairwise_agreements, na.rm = TRUE)
+      
+      return(avg_agreement)
+    }
+
+    # Add the agreement column to the wide dataframe
+    response_parsed_wide <- response_parsed_wide %>%
+      mutate(agreement = calculate_agreement(.))
+  }
+
+  # Return all three versions as a list
+  return(list(
+    response_parsed = response_parsed,
+    response_parsed_long = response_parsed_long,
+    response_parsed_wide = response_parsed_wide
+  ))
+}
+```
+
+## Parse pilot survey
+### Objective
+Parse pilot survey from qualtrics 
+### Input
+- pilot_hx_response 
+- pilot_hx_deidentified
+- prompt_pilot_hx_text
+### Output
+pilot_hx_response_parsed (intermediates/parse_survey)
+
+### Deviations
+pilot_hx_deid doesn't include presenting complaint, I updated the parsing function after running this. Will fail if run again but to minor to adjust function
+```{r parse pilot survey}
+pilot_hx_response <- readRDS(paste0(inputDir, "pilot_hx_response.rds"))
+
+pilot_hx_deidentified <- read_xlsx(paste0(inputDir, "pilot_hx_deidentified.xlsx"))
+
+prompt_text <- readLines(paste0(promptDir, "prompt_pilot_hx.txt"), warn = FALSE) %>% paste(collapse = "\n")
+
+results <- parse_survey_response(pilot_hx_response, pilot_hx_deidentified, prompt_text)
+
+response_parsed <- results$response_parsed
+
+#saveRDS(response_parsed, paste0(intermediatesDir, "pilot_hx_response_parsed.rds"))
+
+```
+
+## Parse tuning survey
+### Objective
+Parse tuning survey from qualtrics 
+### Input
+- tuning_response.csv
+- tuning_deid.xlsx
+- prompt_tuning_1.txt
+### Output
+tuning_response_parsed (intermediates/parse_survey)
+tuning_response_parsed_wide (intermediates/parse_survey)
+
+```{r parse tuning survey}
+tuning_response <- read_csv(paste0(inputDir, "tuning_response.csv"))
+
+tuning_deidentified <- read_xlsx(paste0(inputDir, "tuning_deid.xlsx"))
+
+prompt_tuning_1 <- readLines(paste0(promptDir, "prompt_tuning_1.txt"), warn = FALSE) %>% paste(collapse = "\n")
+
+results <- parse_survey_response(tuning_response, tuning_deidentified, prompt_tuning_1)
+
+tuning_response_parsed <- results$response_parsed
+
+saveRDS(tuning_response_parsed, paste0(intermediatesDir, "tuning_response_parsed.rds"))
+
+tuning_response_parsed_wide <- results$response_parsed_wide
+
+saveRDS(tuning_response_parsed_wide, paste0(intermediatesDir, "tuning_response_parsed_wide.rds"))
+```
+
+## Parse test survey
+### Objective
+Parse test survey from qualtrics 
+### Input
+- test_response.csv
+- test_deid.xlsx
+- prompt_test_1.txt
+### Output
+test_response_parsed (intermediates/parse_survey)
+test_response_parsed_wide (intermediates/parse_survey)
+
+```{r parse test survey}
+test_response <- read_csv(paste0(inputDir, "test_response.csv"))
+
+test_deidentified <- read_xlsx(paste0(inputDir, "test_deidentified.xlsx"))
+
+prompt_test <- readLines(paste0(promptDir, "prompt_test.txt"), warn = FALSE) %>% paste(collapse = "\n")
+
+results <- parse_survey_response(test_response, test_deidentified, prompt_test)
+
+test_response_parsed <- results$response_parsed
+
+saveRDS(test_response_parsed, paste0(intermediatesDir, "test_response_parsed.rds"))
+
+test_response_parsed_wide <- results$response_parsed_wide
+
+saveRDS(test_response_parsed_wide, paste0(intermediatesDir, "test_response_parsed_wide.rds"))
+```

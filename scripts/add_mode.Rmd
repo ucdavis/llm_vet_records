@@ -1,0 +1,118 @@
+---
+title: "add_mode"
+author: "Wulcan"
+date: "2024-08-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Objective
+Function to add mode and agreement by row to response and pivot wider
+```{r libraries, directories and functions}
+library(tidyverse)
+
+toBox <- "~/Library/CloudStorage/Box-Box/"
+
+intermediatesDir <-paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/add_mode/")
+
+# Custom function to calculate the mode
+calculate_mode <- function(x) {
+  x <- na.omit(x)  # Remove NA values
+  if (length(x) == 0) return(NA)  # Handle case with no non-NA values
+  uniq_x <- unique(x)
+  uniq_x[which.max(tabulate(match(x, uniq_x)))]
+}
+
+# Function to calculate agreement score for each row
+calculate_agreement <- function(df) {
+  response_cols <- df %>% select(starts_with("response_"))
+  
+  if (ncol(response_cols) < 2) {
+    return(NA)
+  }
+  
+  pairwise_agreements <- combn(ncol(response_cols), 2, function(idx) {
+    response_cols[[idx[1]]] == response_cols[[idx[2]]]
+  }, simplify = FALSE)
+  
+  pairwise_agreements <- do.call(cbind, pairwise_agreements)
+  
+  avg_agreement <- rowMeans(pairwise_agreements, na.rm = TRUE)
+  
+  return(avg_agreement)
+}
+
+# Function to process the data and generate the final output with grouping
+add_mode <- function(response) {
+  response_long <- response %>%
+    pivot_longer(
+      cols = c(decreased_appetite, polyphagia, vomiting, diarrhea, constipation, weight_loss),
+      names_to = "question",
+      values_to = "response"
+    ) %>%
+    mutate(reference = case_when(
+      question %in% c("decreased_appetite", "polyphagia") ~ appetite_reference,
+      question == "vomiting" ~ vomiting_reference,
+      question %in% c("diarrhea", "constipation") ~ defecation_reference,
+      question == "weight_loss" ~ weight_reference
+    )) %>%
+    select(-appetite_reference, -vomiting_reference, -defecation_reference, -weight_reference)
+  
+  # Grouping by respondent type, temperature, case, and question
+  response_wide <- response_long %>%
+    group_by(respondent_type, temperature, case, question, respondent_no) %>%
+    summarize(
+      response = first(response),
+      reference = first(reference),
+      .groups = 'drop'
+    ) %>%
+    
+    pivot_wider(names_from = respondent_no, values_from = c(response, reference), names_glue = "{.value}_{respondent_no}") %>%
+    rowwise() %>%
+    mutate(
+      mode = calculate_mode(c_across(starts_with("response_"))),
+      agreement = calculate_agreement(cur_data())
+    ) %>%
+    ungroup()
+  
+  
+  return(list(
+    response_long = response_long,
+    response_wide = response_wide
+  ))
+}
+
+```
+
+## Add mode test GPT4o
+### Input
+- test_response_GPT4o (intermediates/combine_responses)
+### Output 
+- mode_test_GPT4o (intermediates/add_mode)
+```{r add mode test GPT4o}
+test_response_GPT4o <- readRDS( paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/combine_responses/test_response_human_GPT4o.rds"))
+
+result<- add_mode(test_response_GPT4o)
+response_mode_test_GPT4o <- result$response_wide
+saveRDS(response_mode_test_GPT4o, paste0(intermediatesDir, "mode_test_GPT4o.rds"))
+response_long_test_GPT4o <- result$response_long
+saveRDS(response_long_test_GPT4o, paste0(intermediatesDir, "long_test_GPT4o.rds"))
+```
+
+## Add mode test GPT35
+### Input
+- test_response_GPT35 (intermediates/combine_responses)
+### Output 
+- mode_test_GPT35 (intermediates/add_mode)
+```{r add mode test GPT35}
+test_response_GPT35 <- readRDS( paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/combine_responses/test_response_human_GPT35.rds"))
+
+result<- add_mode(test_response_GPT35)
+response_mode_test_GPT35 <- result$response_wide
+saveRDS(response_mode_test_GPT35, paste0(intermediatesDir, "mode_test_GPT35.rds"))
+
+```
+

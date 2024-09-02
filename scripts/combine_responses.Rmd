@@ -1,0 +1,81 @@
+---
+title: "combine_responses"
+author: "Wulcan"
+date: "2024-08-17"
+output: html_document
+---
+
+# Objective
+Combine human and llm responses
+
+```{r libraries, directories and functions}
+library(tidyverse)
+
+toBox <- "~/Library/CloudStorage/Box-Box/"
+
+intermediatesDir <-paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/combine_responses/")
+
+combine_responses <- function(response_parsed, llm_parsed) {
+  # Identify columns in response_parsed but not in llm_parsed
+  missing_in_llm <- setdiff(names(response_parsed), names(llm_parsed))
+  
+  # Identify columns in llm_parsed but not in response_parsed
+  missing_in_response <- setdiff(names(llm_parsed), names(response_parsed))
+  
+  # Add missing columns to llm_parsed with NA values
+  if(length(missing_in_llm) > 0) {
+    for(col in missing_in_llm) {
+      llm_parsed[[col]] <- NA
+    }
+  }
+  
+  # Add missing columns to response_parsed with NA values
+  if(length(missing_in_response) > 0) {
+    for(col in missing_in_response) {
+      response_parsed[[col]] <- NA
+    }
+  }
+  
+  # Combine the two dataframes using bind_rows
+  response <- dplyr::bind_rows(response_parsed, llm_parsed)
+  
+  return(response)
+}
+
+```
+
+## Combine human and GPT4o response for test set
+### Input
+- test_response_parsed (intermediates/parse_survey)
+- test_GPT4o_parsed (intermediates/parse_llm_output)
+
+## Output
+- test_response_human_GPT4o (intermediates/combine responses)
+
+```{r test GPT4o}
+test_response_parsed <- readRDS(paste0(toBox, "Projects/LLM/llm_vet_records/intermediates/parse_survey/test_response_parsed.rds"))
+
+test_GPT4o_parsed <- readRDS(paste0(toBox, "Projects/LLM/llm_vet_records/intermediates/parse_llm_output/test_GPT4o_corrected_parsed.rds"))
+
+test_response_human_GPT4o <- combine_responses(test_response_parsed, test_GPT4o_parsed)
+
+saveRDS(test_response_human_GPT4o, paste0(intermediatesDir, "test_response_human_GPT4o.rds"))
+```
+
+## Combine human and GPT35 response for test set
+### Input
+- test_response_parsed (intermediates/parse_survey)
+- test_GPT35_parsed (intermediates/parse_llm_output)
+
+## Output
+- test_response_human_GPT35 (intermediates/combine responses)
+
+```{r test GPT4o}
+test_response_parsed <- readRDS(paste0(toBox, "Projects/LLM/llm_vet_records/intermediates/parse_survey/test_response_parsed.rds"))
+
+test_GPT35_parsed <- readRDS(paste0(toBox, "Projects/LLM/llm_vet_records/intermediates/parse_llm_output/test_GPT35_parsed.rds"))
+
+test_response_human_GPT35 <- combine_responses(test_response_parsed, test_GPT35_parsed)
+
+saveRDS(test_response_human_GPT35, paste0(intermediatesDir, "test_response_human_GPT35.rds"))
+```

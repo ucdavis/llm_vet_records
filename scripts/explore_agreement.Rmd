@@ -1,0 +1,258 @@
+---
+title: "explore_agreement"
+author: "Wulcan"
+date: "2024-08-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Objective
+Explore agreement between respondents 
+
+## Deviations/issues
+- The function generate_combined_tile_plot was made for a specific figure and needs work if it needs to be applied to other dfs
+
+```{r libraries, directories and functions}
+library(tidyverse)
+library(gridExtra)
+library(irr)
+
+toBox <- "~/Library/CloudStorage/Box-Box/"
+#toBox <- "C:/Users/15303/Box/"
+
+inputDir <- paste0(toBox,"Projects/LLM/llm_vet_records/input/")
+
+outputDir <- paste0(toBox,"Projects/LLM/llm_vet_records/output/explore_agreement/")
+
+generate_tile_plot <- function(df, variable, title) {
+  # Calculate proportion of TRUE values for each case
+  prop_df <- df %>%
+    group_by(case) %>%
+    summarize(prop_true = sum(get(variable), na.rm = TRUE) / sum(!is.na(get(variable)))) %>%
+    arrange(prop_true)
+  
+  # Reorder cases based on the proportion of TRUE values
+  df$case <- factor(df$case, levels = prop_df$case)
+  
+  # Modify temperature levels to ensure "Humans" is first and change its label
+  df$temperature <- factor(df$temperature, levels = c("Humans", setdiff(unique(df$temperature), "Humans")))
+  
+  ggplot(df, aes(x = respondent_no, y = case)) +
+    geom_tile(aes(fill = !!sym(variable)), color = "white") +
+    scale_x_continuous(breaks = unique(df$respondent_no), 
+                       expand = c(0, 0)) +
+    scale_fill_manual(
+      values = c("TRUE" = "#3282Bd", "FALSE" = "#FA8533", "NA" = "white"),
+      na.value = "white",
+      breaks = c("TRUE", "FALSE"), 
+      labels = c("TRUE", "FALSE")
+    ) +
+     facet_wrap(~ temperature, nrow = 1, scales = "free_y", 
+           labeller = as_labeller(
+             setNames(ifelse(grepl("^p", df$temperature, ignore.case = TRUE), 
+                             unique(df$temperature),
+                             ifelse(unique(df$temperature) == "Humans", 
+                                    "Humans", 
+                                    paste0(df$respondent_type[match(unique(df$temperature), df$temperature)], 
+                                           " Temp = ", unique(df$temperature)))),
+                      unique(df$temperature)))) +
+    labs(title = title, x = "Respondent No", y = "Case", fill = "") +
+    theme_bw() +
+    theme(
+      legend.position = "none", 
+      text = element_text(family = "Arial", size = 8),
+      axis.text.x = element_text(angle = 45, hjust = 1, family = "Arial", size = 8),
+      axis.text.y = element_blank(),  # Remove y-axis labels
+      axis.ticks.y = element_blank(),
+      plot.title = element_text(family = "Arial", size = 8, face = "bold"),
+      plot.title.position = "plot",  # Allow title to extend over the y-axis
+      legend.title = element_text(family = "Arial", size = 8),
+      legend.text = element_text(family = "Arial", size = 8),
+      strip.text = element_text(family = "Arial", size = 8)
+    )
+}
+
+# For multiple signs in one plot
+generate_combined_tile_plot <- function(df) {
+  ggplot(df, aes(x = respondent_no, y = case)) +
+    geom_tile(aes(fill = value), color = "black") +
+    scale_fill_manual(
+      values = c("TRUE" = "#3282Bd", "FALSE" = "#FA8533", "NA" = "white"), 
+      na.value = "white",
+      breaks = c("TRUE", "FALSE"), 
+      labels = c("TRUE", "FALSE")
+    ) +
+    labs( x = "Respondent No", y = "Case", fill = "") +
+  facet_grid(variable ~ temperature, scales = "free_y", space = "free_y", 
+               labeller = labeller(
+                 temperature = function(temp) {
+                   ifelse(temp == "Humans", "Humans", paste0("GPT-4o Temp ", temp))
+                 },
+                 variable = as_labeller(setNames(titles, variables_ordered))
+               )) +
+    theme_bw() +
+    theme(
+      legend.position = "none", 
+      text = element_text(family = "Arial", size = 8),
+      axis.text.x = element_text(angle = 45, hjust = 1, family = "Arial", size = 8),
+      axis.text.y = element_blank(),  # Remove y-axis labels
+      axis.ticks.y = element_blank(),
+      plot.title = element_text(family = "Arial", size = 8, face = "bold"),
+      plot.title.position = "plot",  # Allow title to extend over the y-axis
+      legend.title = element_text(family = "Arial", size = 8),
+      legend.text = element_text(family = "Arial", size = 8),
+      strip.text = element_text(family = "Arial", size = 8),
+      strip.text.y = element_text(angle = 0, family = "Arial", size = 8)
+    )
+  
+}
+
+
+```
+
+## Explore agreement tuning
+### Objective
+Explore interobserver agreement in the tuning survey (tile plot and kappa)
+### Input
+- tuning_response_parsed (intermediates/parse_survey)
+### Comment
+- For two records there were disagreement between the humans for one or two question each (Case 49: 'Polyphagia?' and 'Weight loss?' and Case 79: 'Decreased appetite?'). For case 49, the human answering false did not reference any text, or did not reference the full text (suspect inattention).For case 79 the humans referenced the same text but answered differently. Upon review the text was ambiguous.
+
+```{r explore agreement tuning}
+tuning_response_parsed <- readRDS(paste0(toBox, "Projects/LLM/llm_vet_records/intermediates/parse_survey/tuning_response_parsed.rds"))
+
+# Titles for the plots in the desired order
+titles <- c("Vomiting?", "Decreased appetite?", "Polyphagia?", "Weight loss?", "Diarrhea?", "Constipation?")
+
+variables_ordered <- c("vomiting", "decreased_appetite", "polyphagia", "weight_loss", "diarrhea", "constipation")
+
+# Generate plots
+plots <- mapply(function(var, title) generate_tile_plot(tuning_response_parsed, var, title), variables_ordered, titles, SIMPLIFY = FALSE)
+
+# Combine plots into a grid
+combined_plot <- grid.arrange(grobs = plots, ncol = 2)
+
+print(combined_plot)
+```
+
+## Explore agreement prompt_engineering
+### Input
+- tuning_prompt_engineering (intermediates/prompt_engineering)
+### Issues/Deviations
+- Analysis done in Chat GPT and temperature info not available, facet headers contain prompt no (p1-p8 instead) modify if this is used.
+```{r}
+tuning_prompt_engineering <- readRDS(paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/prompt_engineering/tuning_prompt_engineering.rds"))
+
+# Titles for the plots in the desired order
+titles <- c("Vomiting?", "Decreased appetite?", "Polyphagia?", "Weight loss?", "Diarrhea?", "Constipation?")
+
+variables_ordered <- c("vomiting", "decreased_appetite", "polyphagia", "weight_loss", "diarrhea", "constipation")
+
+# Generate and save plots separately
+for (i in seq_along(variables_ordered)) {
+  plot <- generate_tile_plot(tuning_prompt_engineering, variables_ordered[i], titles[i])
+  print(plot)
+}
+```
+## Explore agreement test human GPT4o
+### Input
+- test_response_human_GPT4o (intermediates/combine_responses)
+### Output
+- FS3_decreased_appetite (output/explore_agreement)
+- FS4_vomiting (output/explore_agreement)
+- FS5_weight_loss (output/explore_agreement)
+- FS6_diarrhea (output/explore_agreement)
+- FS7_constipation (output/explore_agreement)
+- FS8_polyphagia (output/explore_agreement)
+
+```{r explore agreement test}
+test_response_human_GPT4o <- readRDS(paste0(toBox, "Projects/LLM/llm_vet_records/intermediates/combine_responses/test_response_human_GPT4o.rds"))
+
+# Titles for the plots in the desired order
+titles <- c("Decreased appetite?", "Vomiting?", "Weight loss?", "Diarrhea?", "Constipation?", "Polyphagia?" )
+
+variables_ordered <- c("decreased_appetite","vomiting", "weight_loss", "diarrhea",  "constipation", "polyphagia")
+
+# Generate and save plots separately
+for (i in seq_along(variables_ordered)) {
+  plot <- generate_tile_plot(test_response_human_GPT4o, variables_ordered[i], titles[i])
+  print(plot)
+  plot_file_path <- file.path(outputDir, paste0("FS",i+2, "_", variables_ordered[i], ".png"))
+  ggsave(filename = plot_file_path, plot = plot, width = 180, height = 180, units = "mm", dpi = 300)
+}
+
+```
+
+## Explore agreement errors temp0 test GPT4o
+### Input 
+- test_GPT4o_confusion_matrix_human_temp0 (intermediates/clasification_performance)
+### Output
+- F4a_error_tile_plot_test_GPT4o.png  (output/explore_agreement)
+```{r explore agreement errors temp 0 test GPT4o}
+test_GPT4o_confusion_matrix_human_temp0 <- readRDS(paste0(toBox, "Projects/LLM/llm_vet_records/intermediates/classification_performance/test_GPT4o_confusion_matrix.rds")) %>%
+  filter(temperature == "Humans" | temperature == 0)
+
+fp_fn_cases_questions_temp0<- test_GPT4o_confusion_matrix_human_temp0 %>%
+  filter(confusion_class %in% c("FP", "FN")) %>%
+  select(case, question) %>%
+  distinct()
+
+# Filter the original dataframe to keep only the observations with these identified combinations
+problem_questions_temp0 <- test_GPT4o_confusion_matrix_human_temp0 %>%
+  semi_join(fp_fn_cases_questions_temp0, by = c("case", "question")) %>% 
+  arrange(case, question)
+
+problem_questions_for_agree_plot <- problem_questions_temp0 %>% select(case, question, respondent_type, temperature, agreement, response_1:response_5) %>%
+  pivot_longer(
+    cols = starts_with("response_"),
+    names_to = "respondent_no",
+    names_prefix = "response_",
+    values_to = "response_value" 
+  ) %>%
+  mutate(respondent_no = as.integer(respondent_no)) %>%
+  pivot_wider(
+    names_from = question,
+    values_from = response_value
+  )
+
+# Desired order for the clinical signs
+variables_ordered <- c("decreased_appetite", "vomiting", "weight_loss", "diarrhea", "constipation", "polyphagia")
+
+# Filter out NA values for each variable and add a column for the variable name
+problem_questions_for_agree_plot_filtered <- problem_questions_for_agree_plot %>%
+  filter(
+    (temperature == "Humans" & respondent_type == "Humans") |
+    (temperature != "Humans" & respondent_type == "GPT-4o")
+  ) %>%
+  pivot_longer(
+    cols = all_of(variables_ordered),
+    names_to = "variable",
+    values_to = "value"
+  ) %>%
+  filter(!is.na(value))
+
+
+
+# Set the levels of the variable column based on the desired order
+problem_questions_for_agree_plot_filtered$variable <- factor(problem_questions_for_agree_plot_filtered$variable, levels = variables_ordered)
+
+# Calculate order of cases based on agreement and reorder cases
+agreement_df <- problem_questions_for_agree_plot_filtered %>%
+  group_by(case) %>%
+  summarize(mean_agreement = mean(agreement, na.rm = TRUE), .groups = 'drop') %>%
+  arrange(desc(mean_agreement))
+
+problem_questions_for_agree_plot_filtered$case <- factor(problem_questions_for_agree_plot_filtered$case, levels = rev(agreement_df$case))
+
+# Modify temperature levels to ensure "human" is first and change its label
+problem_questions_for_agree_plot_filtered$temperature <- factor(problem_questions_for_agree_plot_filtered$temperature, levels = c("Humans", setdiff(unique(problem_questions_for_agree_plot_filtered$temperature), "Humans")))
+
+titles <- c("Decreased appetite?", "Vomiting?", "Weight loss?", "Diarrhea?", "Constipation?", "Polyphagia?")
+# Generate the combined plot
+combined_plot <- generate_combined_tile_plot(problem_questions_for_agree_plot_filtered)
+print(combined_plot)
+ggsave(filename = file.path(outputDir, "F3A_error_tile_plot_test_GPT4o.png"), plot = combined_plot, width = 180, height = 120, units = "mm", dpi = 300)
+```

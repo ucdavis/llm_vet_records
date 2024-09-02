@@ -1,0 +1,163 @@
+---
+title: "reproducibility"
+author: "Wulcan"
+date: "2024-08-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, directories, and functions}
+library(tidyverse)
+library(irr)
+
+toBox <- "~/Library/CloudStorage/Box-Box/"
+#toBox <- "C:/Users/15303/Box/"
+
+outputDir <- paste0(toBox,"Projects/LLM/llm_vet_records/output/reproducibility/")
+
+# Function to calculate Cohen's kappa for each pair of respondents
+calculate_kappa_pairs <- function(df) {
+  # Extract all response columns
+  response_cols <- df %>% select(starts_with("response_"))
+  
+  # Generate all unique pairs of response columns
+  pairs <- combn(ncol(response_cols), 2)
+  
+  # Initialize a list to store kappa results
+  kappa_results <- list()
+  
+  # Loop through each pair of columns and calculate Cohen's kappa
+  for (i in 1:ncol(pairs)) {
+    col1 <- response_cols[[pairs[1, i]]]
+    col2 <- response_cols[[pairs[2, i]]]
+    
+    # Create a matrix of the two response columns
+    responses <- cbind(col1, col2)
+    
+    # Remove rows where both responses are NA
+    responses <- responses[!is.na(responses[, 1]) | !is.na(responses[, 2]), ]
+    
+    # Check if there are enough data points to calculate kappa
+    if (nrow(responses) > 1) {
+      # Calculate Cohen's kappa
+      kappa_result <- kappa2(responses, "unweighted")
+      # Store the result in the list
+      kappa_results[[paste0(colnames(response_cols)[pairs[1, i]], "_vs_", colnames(response_cols)[pairs[2, i]])]] <- kappa_result$value
+    } else {
+      # Store NA if not enough data points
+      kappa_results[[paste0("response_", colnames(response_cols)[pairs[1, i]], "_vs_", colnames(response_cols)[pairs[2, i]])]] <- NA
+    }
+  }
+  
+  # Convert the list of kappa results to a dataframe
+  kappa_df <- as.data.frame(kappa_results)
+  
+  # Calculate summary statistics and round them to two decimals
+  kappa_df$median_kappa <- apply(kappa_df, 1, median, na.rm = TRUE)
+  kappa_df$min_kappa <- apply(kappa_df, 1, min, na.rm = TRUE)
+  kappa_df$max_kappa <- apply(kappa_df, 1, max, na.rm = TRUE)
+  kappa_df$lower_quartile <- apply(kappa_df, 1, quantile, probs = 0.25, na.rm = TRUE)
+  kappa_df$upper_quartile <- apply(kappa_df, 1, quantile, probs = 0.75, na.rm = TRUE)
+  
+  return(kappa_df)
+}
+
+# Main function to process df_mode and generate outputs
+generate_kappa_analysis <- function(df_mode) {
+  # Split the data by temperature and calculate kappa for each subset
+  kappas <- df_mode %>%
+    group_by(temperature, respondent_type) %>%  # Include respondent_type in the grouping
+    do({
+      kappa_df <- calculate_kappa_pairs(.)
+      kappa_df <- kappa_df %>%
+        mutate(temperature = unique(.$temperature),
+               respondent_type = unique(.$respondent_type))  # Preserve respondent_type
+      kappa_df
+    }) %>%
+    ungroup() %>%
+    select(respondent_type, temperature, median_kappa, min_kappa, max_kappa, lower_quartile, upper_quartile, starts_with("response_"))
+
+  # Reshape the data for plotting
+  kappas_long <- kappas %>%
+    pivot_longer(cols = starts_with("response_"), 
+                 names_to = "response", values_to = "kappa")
+
+  # Create the boxplot
+  kappas_plot <- ggplot(kappas_long, aes(x = factor(temperature), y = kappa)) +
+    geom_boxplot() +
+    labs(
+      x = "Temperature",
+      y = "Cohen's Kappa") +
+    ylim(-1, 1) +  # Set y-axis limits from -1 to 1
+    theme_bw() +
+    theme(
+      legend.position = "right", 
+      legend.box = "horizontal",  
+      legend.direction = "vertical",  
+      legend.key.height = unit(0.1, "in"),  
+      legend.key.width = unit(0.1, "in"),  
+      legend.spacing.y = unit(0.05, "in"),  
+      axis.text = element_text(size = 9, family = "Arial"),
+      axis.title = element_text(size = 9, family = "Arial"),
+      strip.text = element_text(size = 9, family = "Arial"),
+      legend.title = element_text(size = 9, family = "Arial")
+    )
+  
+  return(list(kappas = kappas, kappas_plot = kappas_plot))
+}
+
+```
+
+## Test GPT4o
+### Input
+- mode_test_GPT4o (intermediates/add_mode)
+### Output
+- F2A_kappas_test_GPT4o.png (output/reproducibility)
+- kappas_test_GPT4o.csv (output/reproducibility)
+```{r}
+response_mode_test_GPT4o <- readRDS(paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/add_mode/mode_test_GPT4o.rds"))
+
+result <- generate_kappa_analysis(response_mode_test_GPT4o)
+
+print(result$kappas)
+print(result$kappas_plot)
+
+kappas_test_GPT4o <- result$kappas %>%
+  select(respondent_type, temperature, median_kappa, lower_quartile, upper_quartile, response_1_vs_response_2:response_4_vs_response_5) %>%
+  mutate(across(-c(respondent_type, temperature), ~ round(.x, 2)))
+
+write_csv(kappas_test_GPT4o, paste0(outputDir, "kappas_test_GPT4o.csv"))
+
+kappas_test_GPT4o_plot <- result$kappas_plot
+
+png_file_path <- file.path(outputDir, "F2A_kappas_test_GPT4o.png")
+
+
+# Save the combined plot to a PNG file using ggsave
+ggsave(filename = png_file_path, plot = kappas_test_GPT4o_plot, width = 85, height = 60, units = "mm", dpi = 300)
+```
+
+## Test GPT35
+### Input
+- mode_test_GPT35 (intermediates/add_mode)
+### Output
+- kappas_test_GPT35.csv (output/reproducibility)
+```{r}
+response_mode_test_GPT35 <- readRDS(paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/add_mode/mode_test_GPT35.rds"))
+
+result <- generate_kappa_analysis(response_mode_test_GPT35)
+
+print(result$kappas)
+print(result$kappas_plot)
+
+kappas_test_GPT35 <- result$kappas %>%
+  select(respondent_type, temperature, median_kappa, lower_quartile, upper_quartile, response_1_vs_response_2:response_4_vs_response_5) %>%
+  mutate(across(-c(respondent_type, temperature), ~ round(.x, 2)))
+
+write_csv(kappas_test_GPT35, paste0(outputDir, "kappas_test_GPT35.csv"))
+
+
+```

@@ -1,0 +1,130 @@
+---
+title: "parse_llm_output"
+author: "Wulcan"
+date: "2024-08-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Objective
+parse llm response
+```{r libraries, directories and functions}
+library(tidyverse)
+library(jsonlite)
+
+toBox <- "~/Library/CloudStorage/Box-Box/"
+#toBox <- "C:/Users/15303/Box/"
+
+inputDir <- paste0(toBox,"Projects/LLM/llm_vet_records/input/")
+
+experimentDir <- paste0(toBox,"Projects/LLM/llm_vet_records/experiment/")
+
+intermediatesDir <- paste0(toBox,"Projects/LLM/llm_vet_records/intermediates/parse_llm_output/")
+
+# Define the function
+parse_llm_response <- function(llm_response, model, output_token_price, input_token_price) {
+  
+  llm_response <- llm_response %>%
+    rename(case = case_number,
+           error = response) %>%
+    mutate(cost_cents = ((num_output_tokens * output_token_price) + (num_input_tokens * input_token_price))/10)
+  
+  # Change name of and in response Id 
+  responseIds <- unique(llm_response$iteration)
+  llms <- paste0(model, "_", seq_along(responseIds))
+  name_mapping <- setNames(llms, responseIds)
+  
+  llm_response <- llm_response %>%
+    mutate(respondent = recode(iteration, !!!name_mapping),
+           respondent_type = model,
+           respondent_no = as.numeric(gsub(paste0(model, "_"), "", respondent))) %>%
+    select(respondent, respondent_type, respondent_no, temperature, status, error, case, appetite_reference, 
+           decreased_appetite, polyphagia, vomiting_reference, vomiting, 
+           defecation_reference, diarrhea, constipation, weight_reference, 
+           weight_loss, elapsed_time, num_output_tokens, num_input_tokens, cost_cents, prompt, record)
+  
+  # Prep temp var for merging
+  llm_response$temperature <- as.character(llm_response$temperature)
+  
+  return(llm_response)
+}
+```
+
+## Parse tuning GPT4o
+### Input
+- tuning_GPT4o (experiment/tuning_4o)
+### Output
+- tuning_GPT4o_parsed (intermediates/parse_llm_output)
+```{r parse tuning GPT4o}
+tuning_GPT4o <- fromJSON(paste0(experimentDir, "/tuning_4o/tuning_GPT4o.json"))
+
+model_name <- "GPT4o"
+
+output_token_price <- 0.015
+  
+input_token_price <- 0.005
+
+tuning_GPT4o_parsed <- parse_llm_response(tuning_GPT4o, model_name, output_token_price, input_token_price)
+
+saveRDS(tuning_GPT4o_parsed, paste0(intermediatesDir, "tuning_GPT4o_parsed.rds"))
+
+```
+
+## Parse test GPT4o
+### Input
+- test_GPT4o (experiment/test_4o)
+### Output
+- test_GPT4o_parsed (intermediates/parse_llm_output)
+```{r test_GPT4o}
+test_GPT4o <- fromJSON(paste0(experimentDir, "/test_4o/test_GPT4o.json"))
+
+model_name <- "GPT4o"
+
+output_token_price <- 0.015
+  
+input_token_price <- 0.005
+
+test_GPT4o_parsed <- parse_llm_response(test_GPT4o, model_name, output_token_price, input_token_price)
+
+saveRDS(test_GPT4o_parsed, paste0(intermediatesDir, "test_GPT4o_parsed.rds"))
+```
+
+## Parse test GPT4o corrected
+### Input
+- test_GPT4o_corrected (manually corrected json format)
+### Output
+- test_GPT4o_corrected_parsed (intermediates/parse_llm_output)
+```{r test_GPT4o_corrected}
+test_GPT4o_corrected <- fromJSON(paste0(inputDir, "test_GPT4o_corrected.json"))
+
+model_name <- "GPT-4o"
+
+output_token_price <- 0.015
+  
+input_token_price <- 0.005
+
+test_GPT4o_corrected_parsed <- parse_llm_response(test_GPT4o_corrected, model_name, output_token_price, input_token_price)
+
+saveRDS(test_GPT4o_corrected_parsed, paste0(intermediatesDir, "test_GPT4o_corrected_parsed.rds"))
+```
+
+## Parse test GPT-3.5
+### Input
+- test_GPT35 
+### Output
+- test_GPT35_parsed (intermediates/parse_llm_output)
+```{r test GPT35}
+test_GPT35 <- fromJSON(paste0(experimentDir, "/test_35/test_GPT35.json"))
+
+model_name <- "GPT-3.5"
+
+output_token_price <- 0.0015
+input_token_price <- 0.0005
+
+test_GPT35_parsed <- parse_llm_response(test_GPT35, model_name, output_token_price, input_token_price)
+
+saveRDS(test_GPT35_parsed, paste0(intermediatesDir, "test_GPT35_parsed.rds"))
+```
