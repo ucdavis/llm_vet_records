@@ -80,7 +80,7 @@ generate_combined_tile_plot <- function(df) {
   ggplot(df, aes(x = respondent_no, y = case)) +
     geom_tile(aes(fill = value), color = "black") +
     scale_fill_manual(
-      values = c("TRUE" = "#3282Bd", "FALSE" = "#FA8533", "NA" = "white"), 
+      values = c("TRUE" = "#3282Bd", "FALSE" = "#FA8533", "missing" = "white"), 
       na.value = "white",
       breaks = c("TRUE", "FALSE"), 
       labels = c("TRUE", "FALSE")
@@ -109,8 +109,6 @@ generate_combined_tile_plot <- function(df) {
     )
   
 }
-
-
 ```
 
 ## Explore agreement tuning
@@ -191,6 +189,8 @@ for (i in seq_along(variables_ordered)) {
 - test_GPT4o_confusion_matrix_human_temp0 (intermediates/clasification_performance)
 ### Output
 - F4a_error_tile_plot_test_GPT4o.png  (output/explore_agreement)
+### Changes
+Fixed that the NA value is displayed as white by changing it to "missing" before filtering out NA values
 ```{r explore agreement errors temp 0 test GPT4o}
 test_GPT4o_confusion_matrix_human_temp0 <- readRDS(paste0(toBox, "Projects/LLM/llm_vet_records/intermediates/classification_performance/test_GPT4o_confusion_matrix.rds")) %>%
   filter(temperature == "Humans" | temperature == 0)
@@ -204,6 +204,10 @@ fp_fn_cases_questions_temp0<- test_GPT4o_confusion_matrix_human_temp0 %>%
 problem_questions_temp0 <- test_GPT4o_confusion_matrix_human_temp0 %>%
   semi_join(fp_fn_cases_questions_temp0, by = c("case", "question")) %>% 
   arrange(case, question)
+
+problem_questions_temp0 <- problem_questions_temp0 %>%
+  mutate(across(starts_with("response_"), as.character)) %>%
+  mutate(across(starts_with("response_"), ~ replace_na(., "missing")))
 
 problem_questions_for_agree_plot <- problem_questions_temp0 %>% select(case, question, respondent_type, temperature, agreement, response_1:response_5) %>%
   pivot_longer(
