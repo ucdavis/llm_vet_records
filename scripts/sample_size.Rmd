@@ -39,7 +39,7 @@ alpha <- 0.05 #type I error rate
 sensitivity_estimate <- 0.95
 prevalence_estimate <- 0.15
 
-z_alpha_two_tail <- abs(qnorm(alpha_adjusted/2, lower.tail = TRUE))
+z_alpha_two_tail <- abs(qnorm(alpha/2, lower.tail = TRUE))
 
 
 variance_sensitvity_estimate <- sensitivity_estimate * (1-sensitivity_estimate) #binomial
