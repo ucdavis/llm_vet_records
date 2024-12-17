@@ -323,9 +323,12 @@ summary_compliance <- purrr::map_df(variables_to_summarize, ~ calculate_complian
 
 compliance_by_temp <- ggplot(
     summary_compliance %>% filter(variable == "citations_complies_with_instructions"), 
-    aes(x = temperature, y = compliance_percentage)
+    aes(x = temperature, y = compliance_percentage, fill = factor(temperature))
   ) +
     geom_bar(stat = "identity") +
+  scale_fill_manual(
+    values = c("0" = "#FA8533", "0.5" = "#FA8533", "1" = "#FA8533", "Humans" = "#3282Bd")
+  ) +
     labs(
       x = "Temperature",
       y = "Compliance (%)"
@@ -420,12 +423,12 @@ png_file_path <- file.path(outputDir, "F2B_compliance_test_gpt4o.png")
 # Save the combined plot to a PNG file using ggsave
 ggsave(filename = png_file_path, plot = compliance_by_temp_test_GPT4o, width = 85, height = 60, units = "mm", dpi = 300)
 
-write_csv(result$summary_compliance, paste0(outputDir, "compliance_summary_test_GPT4o.csv"))
-write_csv(result$summary_deviations, paste0(outputDir, "citation_deviations_summary_test_GPT4o_temp0.csv"))
+#write_csv(result$summary_compliance, paste0(outputDir, "compliance_summary_test_GPT4o.csv"))
+#write_csv(result$summary_deviations, paste0(outputDir, "citation_deviations_summary_test_GPT4o_temp0.csv"))
 
-saveRDS(response_compliance_test_GPT4o, paste0(intermediatesDir, "response_compliance_test_GPT4o.rds"))
+#saveRDS(response_compliance_test_GPT4o, paste0(intermediatesDir, "response_compliance_test_GPT4o.rds"))
 
-saveRDS(citation_deviation_temp0_test_GPT4o, paste0(intermediatesDir, "citation_deviation_temp0_test_GPT4o.rds"))
+#saveRDS(citation_deviation_temp0_test_GPT4o, paste0(intermediatesDir, "citation_deviation_temp0_test_GPT4o.rds"))
 ```
 
 
