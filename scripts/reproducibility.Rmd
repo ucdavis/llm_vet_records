@@ -86,15 +86,18 @@ generate_kappa_analysis <- function(df_mode) {
                  names_to = "response", values_to = "kappa")
 
   # Create the boxplot
-  kappas_plot <- ggplot(kappas_long, aes(x = factor(temperature), y = kappa)) +
+  kappas_plot <- ggplot(kappas_long, aes(x = factor(temperature), y = kappa, color = factor(temperature))) +
     geom_boxplot() +
+    scale_color_manual(
+    values = c("0" = "#FA8533", "0.5" = "#FA8533", "1" = "#FA8533", "Humans" = "#3282Bd")
+  ) +
     labs(
       x = "Temperature",
       y = "Cohen's Kappa") +
     ylim(-1, 1) +  # Set y-axis limits from -1 to 1
     theme_bw() +
     theme(
-      legend.position = "right", 
+      legend.position = "none", 
       legend.box = "horizontal",  
       legend.direction = "vertical",  
       legend.key.height = unit(0.1, "in"),  
@@ -129,7 +132,7 @@ kappas_test_GPT4o <- result$kappas %>%
   select(respondent_type, temperature, median_kappa, lower_quartile, upper_quartile, response_1_vs_response_2:response_4_vs_response_5) %>%
   mutate(across(-c(respondent_type, temperature), ~ round(.x, 2)))
 
-write_csv(kappas_test_GPT4o, paste0(outputDir, "kappas_test_GPT4o.csv"))
+#write_csv(kappas_test_GPT4o, paste0(outputDir, "kappas_test_GPT4o.csv"))
 
 kappas_test_GPT4o_plot <- result$kappas_plot
 
