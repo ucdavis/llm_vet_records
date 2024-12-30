@@ -192,7 +192,7 @@ analyze_classification_performance <- function(df_mode) {
     scale_y_continuous(limits = c(0, 100)) +
     labs(
       x = "Temperature",
-      y = "Metric Value"
+      y = "Metric value (%)"
     ) +
     theme_bw() +
     theme(
