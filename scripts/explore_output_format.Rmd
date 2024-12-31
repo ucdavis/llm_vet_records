@@ -64,8 +64,8 @@ plot_invalid_output <- function(llm_response_parsed) {
   
   error_plot <- ggplot(error_type_data, aes(x = factor(temperature), y = percentage, fill = status)) +
     geom_bar(stat = "identity", position = "stack") +
-    labs(x = "Temperature", y = "Percentages (%)", fill = "Output issues") +
-    scale_fill_manual(values = output_color_scale,  labels = output_label) +
+    labs(x = "Temperature", y = "Invalid output (%)", fill = "") +
+    scale_fill_manual(values = output_color_scale,  labels = output_label, na.translate = FALSE) +
     theme_bw() +
     theme(legend.position = "right", 
           legend.box = "horizontal",  
@@ -128,7 +128,7 @@ print(tuning_GPT4o_invalid_output_plot)
 png_file_path <- file.path(outputDir, "FS1_tuning_GPT4o_invalid_output.png")
 
 # Save the combined plot to a PNG file using ggsave
-ggsave(filename = png_file_path, plot = tuning_GPT4o_invalid_output_plot, width = 85, height = 45, units = "mm", dpi = 300)
+ggsave(filename = png_file_path, plot = tuning_GPT4o_invalid_output_plot, width = 180, height = 45, units = "mm", dpi = 300)
 
 #Summarize invalid format
 tuning_GPT4o_invalid_output_summary <- summarize_invalid_output(tuning_GPT4o_parsed)
