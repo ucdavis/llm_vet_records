@@ -321,14 +321,15 @@ variables_to_summarize <- c(
 
 summary_compliance <- purrr::map_df(variables_to_summarize, ~ calculate_compliance_summary(response_compliance, .x))
 
+summary_compliance <- summary_compliance %>%
+  mutate(respondent_type = ifelse(temperature == "Humans", "Humans", "GPT-4o"),
+         temperature = ifelse(temperature == "Humans", "NA", temperature))
+
 compliance_by_temp <- ggplot(
     summary_compliance %>% filter(variable == "citations_complies_with_instructions"), 
-    aes(x = temperature, y = compliance_percentage, fill = factor(temperature))
+    aes(x = temperature, y = compliance_percentage)
   ) +
     geom_bar(stat = "identity") +
-  scale_fill_manual(
-    values = c("0" = "#FA8533", "0.5" = "#FA8533", "1" = "#FA8533", "Humans" = "#3282Bd")
-  ) +
     labs(
       x = "Temperature",
       y = "Compliance (%)"
@@ -345,7 +346,8 @@ compliance_by_temp <- ggplot(
       axis.title = element_text(size = 9, family = "Arial"),
       strip.text = element_text(size = 9, family = "Arial"),
       legend.title = element_text(size = 9, family = "Arial")
-    )
+    ) +
+  facet_grid(~ respondent_type, scales = "free_x", space = "free_x")
 
   
   return(list(

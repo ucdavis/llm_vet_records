@@ -83,14 +83,13 @@ generate_kappa_analysis <- function(df_mode) {
   # Reshape the data for plotting
   kappas_long <- kappas %>%
     pivot_longer(cols = starts_with("response_"), 
-                 names_to = "response", values_to = "kappa")
+                 names_to = "response", values_to = "kappa") 
+  kappas_long <- kappas_long %>%
+    mutate(temperature = ifelse(temperature == "Humans", "NA", temperature))
 
   # Create the boxplot
-  kappas_plot <- ggplot(kappas_long, aes(x = factor(temperature), y = kappa, color = factor(temperature))) +
+  kappas_plot <- ggplot(kappas_long, aes(x = factor(temperature), y = kappa)) +
     geom_boxplot() +
-    scale_color_manual(
-    values = c("0" = "#FA8533", "0.5" = "#FA8533", "1" = "#FA8533", "Humans" = "#3282Bd")
-  ) +
     labs(
       x = "Temperature",
       y = "Cohen's Kappa") +
@@ -107,7 +106,8 @@ generate_kappa_analysis <- function(df_mode) {
       axis.title = element_text(size = 9, family = "Arial"),
       strip.text = element_text(size = 9, family = "Arial"),
       legend.title = element_text(size = 9, family = "Arial")
-    )
+    ) +
+    facet_grid(~ respondent_type, scales = "free_x", space = "free_x")
   
   return(list(kappas = kappas, kappas_plot = kappas_plot))
 }
